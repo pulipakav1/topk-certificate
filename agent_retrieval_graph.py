@@ -1,34 +1,4 @@
-"""
-agent_retrieval_graph.py
-=========================
-
-Modular toolkit for analyzing a directed, weighted multi-agent retrieval
-graph G = (V, E, W) via spectral graph theory.
-
-Pipeline
---------
-1. build_retrieval_graph   -- construct/ingest a directed weighted graph
-2. weighted_adjacency      -- G -> scipy.sparse adjacency matrix
-3. normalized_laplacian    -- A -> L = I - D^-1/2 A D^-1/2  (symmetrized)
-4. algebraic_connectivity  -- L -> lambda_2 (Fiedler value) via eigsh
-5. prune_edges             -- iteratively remove edges, tracking lambda_2
-6. find_bottlenecks        -- flag prunings that collapse lambda_2 -> 0
-
-Notes on directedness
-----------------------
-The normalized graph Laplacian I - D^-1/2 A D^-1/2 is only guaranteed
-real-symmetric (hence diagonalizable with orthogonal eigenvectors, and
-usable with scipy.sparse.linalg.eigsh) when A is symmetric. Since G is a
-directed multi-agent communication/retrieval graph, we analyze
-connectivity on its symmetrized "communication skeleton"
-A_sym = (A + A^T) / 2, which preserves W (edge weights survive averaging)
-while treating a bidirectional retrieval channel as a single undirected
-link for the purposes of measuring structural connectivity /
-bottlenecks. This is the standard trick for spectral analysis of
-directed graphs when a symmetric Laplacian is required.
-
-Author: generated for structural bottleneck analysis of agent graphs.
-"""
+"""graph toolkit"""
 
 from __future__ import annotations
 
@@ -48,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------
-# 1. Graph construction
+# build graph
 # --------------------------------------------------------------------------
 
 def build_retrieval_graph(
@@ -58,39 +28,17 @@ def build_retrieval_graph(
     seed: Optional[int] = None,
     ensure_weakly_connected: bool = True,
 ) -> nx.DiGraph:
-    """
-    Build a directed multi-agent retrieval graph G = (V, E, W).
-
-    Each node represents an agent (or retrieval unit); each directed edge
-    (u, v, weight) represents a retrieval/communication channel from
-    agent u to agent v with strength `weight` (e.g. retrieval relevance,
-    trust score, or bandwidth).
-
-    Parameters
-    ----------
-    n_agents : number of agents/nodes |V|.
-    edge_prob : probability of a directed edge existing between any
-        ordered pair of distinct nodes (Erdos-Renyi style).
-    weight_range : (low, high) uniform range for edge weights W.
-    seed : RNG seed for reproducibility.
-    ensure_weakly_connected : if True, stitch a random spanning ring
-        of edges through all nodes first, so the graph never starts
-        out trivially disconnected (lambda_2 = 0 by construction).
-
-    Returns
-    -------
-    nx.DiGraph with a 'weight' attribute on every edge.
-    """
+    """build graph"""
     rng = np.random.default_rng(seed)
     G = nx.DiGraph()
     G.add_nodes_from(f"agent_{i}" for i in range(n_agents))
     nodes = list(G.nodes())
 
     if ensure_weakly_connected and n_agents > 1:
-        # Random permutation ring guarantees weak connectivity as a
-        # baseline "backbone" before random edges are layered on top.
+        # ring backbone
+        # base backbone
         order = [str(x) for x in rng.permutation(nodes)]
-        rotated = order[1:] + order[:1]  # avoid np.roll: it re-boxes str as np.str_
+        rotated = order[1:] + order[:1]  # avoid reboxing
         for u, v in zip(order, rotated):
             w = float(rng.uniform(*weight_range))
             G.add_edge(u, v, weight=w)
@@ -112,38 +60,28 @@ def build_retrieval_graph(
 
 
 # --------------------------------------------------------------------------
-# 2. Adjacency extraction
+# get adjacency
 # --------------------------------------------------------------------------
 
 def weighted_adjacency(G: nx.DiGraph, nodelist: Optional[list] = None) -> sp.csr_matrix:
-    """Return the weighted (directed) adjacency matrix A as scipy.sparse.csr_matrix."""
+    """get adjacency"""
     nodelist = nodelist or list(G.nodes())
     A = nx.to_scipy_sparse_array(G, nodelist=nodelist, weight="weight", format="csr")
     return A.astype(np.float64)
 
 
 def symmetrize(A: sp.spmatrix) -> sp.csr_matrix:
-    """Symmetrize a (possibly directed) adjacency matrix: A_sym = (A + A^T) / 2."""
+    """average symmetric"""
     A_sym = (A + A.T) * 0.5
     return A_sym.tocsr()
 
 
 # --------------------------------------------------------------------------
-# 3. Normalized Laplacian
+# build laplacian
 # --------------------------------------------------------------------------
 
 def normalized_laplacian(A: sp.spmatrix, eps: float = 1e-12) -> sp.csr_matrix:
-    """
-    Compute the symmetric normalized graph Laplacian
-
-        L = I - D^{-1/2} A D^{-1/2}
-
-    where D is the diagonal degree matrix of A (row sums) and A is assumed
-    symmetric (use `symmetrize` first for directed graphs).
-
-    Isolated nodes (degree 0) are handled by zeroing their D^{-1/2} entry
-    (they contribute a trivial 0 row/col rather than a division by zero).
-    """
+    """build laplacian"""
     A = A.tocsr()
     n = A.shape[0]
     degree = np.asarray(A.sum(axis=1)).flatten()
@@ -160,7 +98,7 @@ def normalized_laplacian(A: sp.spmatrix, eps: float = 1e-12) -> sp.csr_matrix:
 
 
 # --------------------------------------------------------------------------
-# 4. Algebraic connectivity (Fiedler value)
+# find lambda2
 # --------------------------------------------------------------------------
 
 def algebraic_connectivity(
@@ -168,31 +106,21 @@ def algebraic_connectivity(
     tol: float = 1e-8,
     max_iter: int = 5000,
 ) -> float:
-    """
-    Compute lambda_2, the second-smallest eigenvalue of the normalized
-    Laplacian L, using scipy.sparse.linalg.eigsh.
-
-    lambda_2 (algebraic connectivity / Fiedler value) is 0 iff the graph
-    is disconnected; larger values indicate stronger, more robust
-    connectivity (harder to fragment the information-flow structure).
-
-    For very small graphs (n <= 3) eigsh's Lanczos iteration cannot
-    produce enough Krylov vectors, so we fall back to a dense solve.
-    """
+    """find lambda2"""
     n = L.shape[0]
     if n < 2:
         return 0.0
 
     if n <= 3:
-        # eigsh requires k < n and enough dimensions for Lanczos; use
-        # a dense fallback for tiny graphs.
+        # small fallback
+        # dense fallback
         eigvals = np.linalg.eigvalsh(L.toarray())
         eigvals.sort()
         return float(eigvals[1])
 
     try:
-        # 'SA' = smallest algebraic eigenvalues; L is symmetric PSD so
-        # this reliably returns the two smallest (lambda_1 ~ 0, lambda_2).
+        # smallest eigenvalues
+        # two smallest
         eigvals = spla.eigsh(
             L, k=2, which="SA", tol=tol, maxiter=max_iter, return_eigenvectors=False
         )
@@ -200,7 +128,7 @@ def algebraic_connectivity(
         logger.warning("eigsh did not fully converge (%s); using partial result.", exc)
         eigvals = exc.eigenvalues
         if eigvals is None or len(eigvals) < 2:
-            # Dense fallback if ARPACK gives us nothing usable.
+            # dense fallback
             eigvals = np.linalg.eigvalsh(L.toarray())
 
     eigvals = np.sort(np.real(eigvals))
@@ -208,34 +136,12 @@ def algebraic_connectivity(
 
 
 def compute_pipeline_lambda2(G: nx.DiGraph, nodelist: Optional[list] = None) -> float:
-    """
-    Convenience wrapper: DiGraph -> symmetrized adjacency -> L -> lambda_2.
-
-    lambda_2 is only a meaningful "how well can information actually flow
-    through this graph" signal when there's at least one edge and the graph
-    is a single connected component -- by definition, lambda_2 = 0 iff the
-    graph is disconnected (which includes "zero edges", the most
-    disconnected case possible: n separate isolated-vertex components).
-
-    The symmetric normalized Laplacian I - D^-1/2 A D^-1/2 has a
-    well-known quirk here (see e.g. von Luxburg, "A Tutorial on Spectral
-    Clustering", Sec. 3): an isolated (degree-0) vertex contributes
-    eigenvalue *1*, not 0, to the spectrum, because D^-1/2 is defined as 0
-    there to avoid a division by zero, collapsing that vertex's row/column
-    of L to the identity. A totally edgeless graph is therefore L = I_n,
-    whose eigenvalues are *all* exactly 1.0 -- naively reading that off as
-    lambda_2 = 1.0 reports the *maximum possible* algebraic connectivity
-    for a graph with zero information flow, exactly backwards from what
-    the metric is supposed to mean. We detect the "no edges" / "more than
-    one connected component" cases explicitly up front and short-circuit
-    to the mathematically correct lambda_2 = 0.0 rather than handing an
-    all-zero or block-isolated adjacency matrix to the eigensolver.
-    """
+    """wrapper lambda2"""
     A = weighted_adjacency(G, nodelist=nodelist)
     A_sym = symmetrize(A)
 
     if A_sym.nnz == 0 or A_sym.max() <= 0:
-        return 0.0  # no edges at all -> n isolated components -> maximally disconnected
+        return 0.0  # fully disconnected
 
     n_components, _ = connected_components(A_sym, directed=False)
     if n_components > 1:
@@ -246,7 +152,7 @@ def compute_pipeline_lambda2(G: nx.DiGraph, nodelist: Optional[list] = None) -> 
 
 
 # --------------------------------------------------------------------------
-# 5. Edge-pruning simulation
+# prune edges
 # --------------------------------------------------------------------------
 
 @dataclass
@@ -266,32 +172,9 @@ def prune_edges(
     stop_at_zero: bool = True,
     zero_tol: float = 1e-9,
 ) -> list[PruneStep]:
-    """
-    Simulate progressive edge removal and track algebraic connectivity
-    after each removal, to surface structural information bottlenecks
-    (edges whose loss drives lambda_2 -> 0, i.e. fragments or nearly
-    fragments the agent communication graph).
-
-    Parameters
-    ----------
-    G : the retrieval graph (not mutated -- operates on a copy).
-    strategy : edge removal order.
-        - 'min_weight'   : remove weakest (lowest-trust/relevance) edges first.
-        - 'max_betweenness': remove highest edge-betweenness ("critical
-                              bridge") edges first -- the classic recipe
-                              for fast fragmentation.
-        - 'random'       : remove in random order (baseline/control).
-    max_steps : cap on number of removals (default: all edges).
-    stop_at_zero : halt as soon as lambda_2 first drops to ~0
-        (i.e. the graph has just become disconnected).
-    zero_tol : threshold below which lambda_2 is considered "zero".
-
-    Returns
-    -------
-    List of PruneStep records, one per edge removed, in removal order.
-    """
+    """prune edges"""
     H = G.copy()
-    nodelist = list(H.nodes())  # fixed node ordering across all steps
+    nodelist = list(H.nodes())  # fixed ordering
     edges = list(H.edges(data="weight"))
 
     rng = np.random.default_rng(0)
@@ -311,7 +194,7 @@ def prune_edges(
     history: list[PruneStep] = []
     for i, (u, v, w) in enumerate(edges, start=1):
         if not H.has_edge(u, v):
-            continue  # already removed as part of an earlier tie
+            continue  # already removed
         H.remove_edge(u, v)
 
         lam2 = compute_pipeline_lambda2(H, nodelist=nodelist)
@@ -341,20 +224,16 @@ def prune_edges(
 
 
 # --------------------------------------------------------------------------
-# 6. Bottleneck identification
+# find bottlenecks
 # --------------------------------------------------------------------------
 
 def find_bottlenecks(history: Iterable[PruneStep], zero_tol: float = 1e-9) -> list[PruneStep]:
-    """
-    From a pruning history, return the steps that drove lambda_2 to ~0,
-    i.e. the specific edges whose removal created a structural
-    information bottleneck (fragmenting or near-fragmenting the graph).
-    """
+    """find bottlenecks"""
     return [step for step in history if step.lambda2 < zero_tol]
 
 
 def summarize_bottlenecks(history: list[PruneStep], zero_tol: float = 1e-9) -> str:
-    """Human-readable summary of the pruning run and any bottlenecks found."""
+    """summarize bottlenecks"""
     if not history:
         return "No edges were pruned."
 
@@ -376,7 +255,7 @@ def summarize_bottlenecks(history: list[PruneStep], zero_tol: float = 1e-9) -> s
 
 
 # --------------------------------------------------------------------------
-# CLI entry point
+# run demo
 # --------------------------------------------------------------------------
 
 def main() -> None:

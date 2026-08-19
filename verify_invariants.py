@@ -1,32 +1,4 @@
-"""
-verify_invariants.py
-======================
-
-Automated verification checklist for the three core mathematical
-invariants underpinning `agent_retrieval_graph.py` and
-`fisher_information_geometry.py`:
-
-  1. Normalized Laplacian spectrum:  L = I - D^-1/2 A D^-1/2  is PSD, with
-         0 = lambda_1 <= lambda_2 <= ... <= lambda_n <= 2
-     (lambda_1 approx 0 within numerical tolerance; lambda_2 strictly
-     non-negative -- the algebraic connectivity used to detect bottlenecks).
-
-  2. Fisher tensor PSD:  F(theta) >= 0  (diagonal entries non-negative, or
-     the full FIM has no negative eigenvalues), so that the geodesic
-     distance's argument under the square root is never negative/complex.
-
-  3. Edge weight dynamic range:  W_ij = exp(-gamma * d_IG) in (0, 1], with
-     no NaN/Inf and no division-by-zero in the kernel transform.
-
-Each check is a `check_*` function that raises `AssertionError` with a
-diagnostic message on failure and returns a details dict on success; they
-are also exposed as `test_*` wrappers so `pytest verify_invariants.py`
-picks them up automatically. Running this file directly (`python
-verify_invariants.py`) exercises every check against real data produced
-by both modules -- including deliberately adversarial stress cases (a
-disconnected graph, an all-zero Fisher, an extreme gamma) -- and prints a
-pass/fail report.
-"""
+"""verify invariants"""
 
 from __future__ import annotations
 
@@ -63,19 +35,13 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------
-# Check 1: normalized Laplacian spectrum
+# check laplacian
 # --------------------------------------------------------------------------
 
 def check_laplacian_spectrum(
     L: sp.spmatrix, zero_tol: float = 1e-10, upper_tol: float = 1e-8, dense_cutoff: int = 200
 ) -> dict:
-    """
-    Verify 0 = lambda_1 <= lambda_2 <= ... <= lambda_n <= 2 for a normalized
-    graph Laplacian. For n <= dense_cutoff the *entire* spectrum is checked
-    (dense eigh); otherwise only lambda_1, lambda_2, lambda_n are checked
-    via sparse eigsh, which is sufficient to certify the PSD lower bound,
-    the algebraic-connectivity sign, and the theoretical upper bound.
-    """
+    """check laplacian"""
     n = L.shape[0]
     if n < 2:
         raise ValueError("Laplacian must have at least 2 nodes to define lambda_2.")
@@ -113,7 +79,7 @@ def test_laplacian_spectrum_connected_graph() -> None:
 
 
 def test_laplacian_spectrum_disconnected_graph() -> None:
-    """Adversarial case: a graph with two isolated components must yield lambda_2 ~ 0."""
+    """disconnected test"""
     G1 = build_retrieval_graph(n_agents=5, edge_prob=0.5, seed=2)
     G2 = build_retrieval_graph(n_agents=5, edge_prob=0.5, seed=3)
     G = nx.DiGraph()
@@ -133,36 +99,24 @@ def test_laplacian_spectrum_disconnected_graph() -> None:
 
 
 def test_laplacian_spectrum_larger_graph_sparse_path() -> None:
-    """Exercise the eigsh-only (non-dense) branch on a graph above dense_cutoff... using a
-    small dense_cutoff override so the test stays fast while still covering that code path."""
+    """sparse test"""
     G = build_retrieval_graph(n_agents=40, edge_prob=0.2, seed=4)
     L = normalized_laplacian(symmetrize(weighted_adjacency(G)))
     check_laplacian_spectrum(L, dense_cutoff=10)
 
 
 def test_pipeline_lambda2_zero_edges_is_zero_not_one() -> None:
-    """
-    Regression test for a real failure observed in the HotpotQA SIR pipeline:
-    an over-sharpened Fisher-Rao kernel (large gamma) underflowed every
-    W_ij to exactly 0.0, producing a totally edgeless graph. Naively
-    eigendecomposing L = I - D^-1/2 A D^-1/2 for that graph gives L = I_n
-    (every vertex isolated), whose spectrum is n copies of eigenvalue 1 --
-    so an unguarded pipeline would report lambda_2 = 1.0, the *maximum*
-    possible algebraic connectivity, for a graph with zero information
-    flow. `compute_pipeline_lambda2` must special-case this to 0.0.
-    """
+    """edgeless test"""
     G = nx.DiGraph()
-    G.add_nodes_from(f"agent_{i}" for i in range(10))  # no edges at all
+    G.add_nodes_from(f"agent_{i}" for i in range(10))  # no edges
     lam2 = compute_pipeline_lambda2(G)
     assert lam2 == 0.0, f"Edgeless graph must report lambda_2 = 0.0 (maximally disconnected), got {lam2!r}."
 
 
 def test_pipeline_lambda2_isolated_vertex_within_graph() -> None:
-    """A graph that's otherwise well-connected but has one totally isolated
-    vertex is still disconnected (n_components >= 2) and must report
-    lambda_2 ~ 0, not the connectivity value of the non-isolated component."""
+    """isolated test"""
     G = build_retrieval_graph(n_agents=9, edge_prob=0.5, seed=5)
-    G.add_node("isolated_agent")  # degree 0, no edges in or out
+    G.add_node("isolated_agent")  # zero degree
     lam2 = compute_pipeline_lambda2(G)
     assert lam2 == 0.0, (
         f"Graph with an isolated vertex must report lambda_2 = 0.0 (it's a second, trivial "
@@ -171,16 +125,11 @@ def test_pipeline_lambda2_isolated_vertex_within_graph() -> None:
 
 
 # --------------------------------------------------------------------------
-# Check 2: Fisher tensor PSD
+# check fisher
 # --------------------------------------------------------------------------
 
 def check_fisher_psd(fisher: torch.Tensor, diagonal: bool = True, tol: float = -1e-8) -> dict:
-    """
-    Verify F(theta) >= 0: diagonal entries non-negative (diagonal
-    approximation), or all eigenvalues non-negative and the matrix
-    symmetric (full FIM) -- both guarantee the geodesic-distance quadratic
-    form (theta_i - theta_j)^T F (theta_i - theta_j) is never negative.
-    """
+    """check fisher"""
     F = fisher.detach().cpu().double()
 
     if diagonal:
@@ -242,14 +191,14 @@ def test_fisher_psd_full_from_real_gradients() -> None:
 
 
 def test_fisher_psd_degenerate_all_zero_gradients() -> None:
-    """Adversarial case: gradient logs are all exactly zero -> F = 0, still valid PSD (boundary)."""
+    """zero test"""
     grad_logs = torch.zeros(20, 15, dtype=torch.float64)
     check_fisher_psd(empirical_fisher(grad_logs, diagonal=True), diagonal=True)
     check_fisher_psd(empirical_fisher(grad_logs, diagonal=False), diagonal=False)
 
 
 def test_fisher_psd_rejects_synthetic_negative_entry() -> None:
-    """Sanity check that check_fisher_psd actually *fails* on a genuinely invalid tensor."""
+    """reject test"""
     bad_diag = torch.tensor([0.1, -0.5, 0.2])
     try:
         check_fisher_psd(bad_diag, diagonal=True)
@@ -259,20 +208,13 @@ def test_fisher_psd_rejects_synthetic_negative_entry() -> None:
 
 
 # --------------------------------------------------------------------------
-# Check 3: edge weight dynamic range
+# check kernel
 # --------------------------------------------------------------------------
 
 def check_edge_weight_range(
     W: torch.Tensor, zero_diagonal: bool = True, upper: float = 1.0, tol: float = 1e-9
 ) -> dict:
-    """
-    Verify W_ij in (0, 1] off-diagonal (with the diagonal matching the
-    `zero_diagonal` convention), and that no NaN/Inf leaked out of the
-    kernel transform. Exact-zero underflow on individual entries is
-    reported as a warning rather than a hard failure -- it is an inherent
-    float64 boundary effect of exp(-gamma * d) for large gamma * d, not a
-    sign of a division-by-zero or overflow bug.
-    """
+    """check kernel"""
     Wn = W.detach().cpu().double().numpy()
     assert np.isfinite(Wn).all(), "W contains NaN or Inf entries -- kernel transform produced an undefined value."
 
@@ -325,10 +267,10 @@ def test_edge_weight_range_default_gamma() -> None:
 
 
 def test_edge_weight_range_extreme_gamma_underflow_is_caught() -> None:
-    """Adversarial case: an extreme gamma should underflow weights towards 0, not NaN/Inf."""
+    """underflow test"""
     thetas, fishers = _make_agent_fishers(seed=30)
     W, _ = fisher_rao_edge_weights(thetas, fishers, diagonal=True, gamma=1e4)
-    result = check_edge_weight_range(W)  # must not raise -- 0 is a valid boundary value, not NaN/Inf
+    result = check_edge_weight_range(W)  # no raise
     assert result["n_zero_underflow"] > 0, "Expected extreme gamma to underflow at least one edge weight."
 
 
@@ -346,13 +288,13 @@ def test_edge_weight_kernel_no_division_bounded_output() -> None:
     d = torch.tensor([0.0, 1.0, 10.0, 100.0])
     w = edge_weight_kernel(d, gamma=1.0)
     assert torch.isfinite(w).all()
-    assert float(w[0]) == 1.0  # d=0 -> W=1 exactly (self-affinity)
+    assert float(w[0]) == 1.0  # self affinity
     assert bool((w >= 0).all() and (w <= 1).all())
-    assert bool((w[:-1] > w[1:]).all())  # monotonically decreasing in distance
+    assert bool((w[:-1] > w[1:]).all())  # monotonic decrease
 
 
 # --------------------------------------------------------------------------
-# Runner: pass/fail report
+# print report
 # --------------------------------------------------------------------------
 
 @dataclass
@@ -387,7 +329,7 @@ def run_all_checks() -> List[CheckOutcome]:
             outcomes.append(CheckOutcome(fn.__name__, True))
         except AssertionError as exc:
             outcomes.append(CheckOutcome(fn.__name__, False, str(exc)))
-        except Exception as exc:  # unexpected error -- still report, don't crash the whole run
+        except Exception as exc:  # keep running
             outcomes.append(CheckOutcome(fn.__name__, False, f"{type(exc).__name__}: {exc}"))
     return outcomes
 

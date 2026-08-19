@@ -1,24 +1,4 @@
-"""
-margin_diagnostics.py
-========================
-
-Per-query gold-vs-distractor score-margin diagnostic for the HotpotQA
-pipeline in `evaluation_harness.py`: measures whether cross-agent Markov
-averaging compresses the score gap between gold and distractor documents
-enough to explain the NDCG@5 gap on its own, as distinct from the
-gold/distractor *mass* allocation already checked in
-`theorem1_diagnostics.py`.
-
-    mean margin   m_bar^(h) = mean(gold scores) - mean(distractor scores)
-    hard margin   Delta_m   = min(gold scores) - max(distractor scores)
-    violated      Delta_m < 0   (a distractor outscores the worst gold doc
-                                  -- a necessary condition for that
-                                  distractor to bump a gold doc out of a
-                                  top-k cutoff)
-
-Both are computed per query, then averaged (mean margin) / rate-counted
-(violation) across the query set for a single (strategy, hop).
-"""
+"""margin diagnostics"""
 
 from __future__ import annotations
 
@@ -28,28 +8,7 @@ import numpy as np
 
 
 def compute_score_margin_diagnostics(scores: np.ndarray, gold_indices: np.ndarray) -> dict:
-    """
-    scores: (n_agents,) retrieval scores at one hop, for a single query.
-    gold_indices: indices into `scores` of that query's gold documents.
-
-    Also returns a *standardized* margin (scores z-scored within the
-    query, i.e. (scores - mean) / std, before computing the same two
-    quantities) alongside the raw ones. The raw bilinear score
-    q . doc is not scale-invariant -- if the diffusion dynamics push an
-    agent's head-weight norm to a different regime than another
-    strategy's, every score for that query inflates or shrinks together,
-    changing the raw margin's magnitude for reasons that have nothing to
-    do with gold/distractor separability. Standardizing per query removes
-    that confound so margins are comparable across strategies/hops whose
-    underlying head norms may differ; NDCG/F1 are themselves scale/shift
-    invariant, so the standardized margin is the more relevant one for
-    explaining rank-based metrics specifically.
-
-    Returns None-valued dict (via the caller's aggregation skipping it) is
-    not done here -- callers should skip degenerate queries (no gold docs,
-    or no distractor docs) themselves, mirroring
-    `theorem1_diagnostics.routing_mass_diagnostic_batch`.
-    """
+    """score margins"""
     n = len(scores)
     gold_set = set(int(i) for i in gold_indices)
     distractor_indices = np.array([i for i in range(n) if i not in gold_set], dtype=int)
@@ -77,18 +36,13 @@ def compute_score_margin_diagnostics(scores: np.ndarray, gold_indices: np.ndarra
 
 
 def aggregate_margin_diagnostics(records: List[dict], per_query_scores: List[np.ndarray]) -> dict:
-    """
-    Batched wrapper: `per_query_scores[i]` is the (n_agents,) score array
-    for `records[i]` at one (strategy, hop). Skips any query with zero
-    gold or zero distractor documents (can't define a margin), matching
-    the same convention used for the routing-mass diagnostic.
-    """
+    """batch margins"""
     mean_margins, hard_margins, violations = [], [], []
     mean_margins_z, hard_margins_z = [], []
     for rec, scores in zip(records, per_query_scores):
         gold_indices = np.where(rec["relevance"] > 0)[0]
         if len(gold_indices) == 0 or len(gold_indices) == len(scores):
-            continue  # degenerate: no gold, or every slot is gold (no distractors to compare against)
+            continue  # skip degenerate
         d = compute_score_margin_diagnostics(scores, gold_indices)
         mean_margins.append(d["mean_margin"])
         hard_margins.append(d["hard_margin"])

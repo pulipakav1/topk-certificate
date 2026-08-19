@@ -1,58 +1,4 @@
-"""
-evaluation_harness.py
-=======================
-
-Evaluation harness comparing two multi-agent routing strategies over 5
-multi-hop reasoning steps, built on top of `agent_retrieval_graph.py`
-(normalized Laplacian / algebraic connectivity) and
-`fisher_information_geometry.py` (empirical Fisher / Fisher-Rao edge
-weights):
-
-  * Baseline  -- standard cosine-similarity message passing between agent
-    states (Graph-of-Thoughts style): each agent retrieves from its top-k
-    most similar peers, recomputed fresh every hop.
-  * Proposed (SIR) -- Spectral Information Routing: builds a fully
-    Fisher-Rao-weighted routing graph (W_ij = exp(-d_IG(theta_i, theta_j)))
-    every hop, then greedily filters out the *weakest* edges down to the
-    same edge budget as the baseline while using the normalized-Laplacian
-    algebraic connectivity lambda_2 as a veto: an edge is only removed if
-    doing so does not collapse lambda_2 -> 0 (i.e. it isn't a structural
-    bottleneck / bridge).
-
-Task setup (synthetic, self-contained -- no external dataset)
----------------------------------------------------------------
-One agent starts as the "expert" (its linear model already matches the
-hidden ground-truth relevance function); every other agent starts
-uninformed (random weights). Over 5 hops, agents diffuse their internal
-parameter state through the routing graph. At every hop each agent issues
-a probe query and we score/rank a fixed pool of candidate documents,
-measuring how well (and how quickly) the expert's knowledge propagates:
-
-  * lambda_2            -- algebraic connectivity of that hop's routing graph.
-  * NDCG@k / F1@k        -- mean retrieval accuracy across all agents.
-  * mean parameter drift -- mean_i || theta_i(t) - theta_i(0) ||_2.
-
-Outputs
--------
-  figures/routing_comparison_trends.{pdf,eps} -- 2x2 IEEE double-column
-      figure: lambda_2, NDCG@k, F1@k, and parameter drift vs. hop.
-  figures/lambda2_vs_ndcg.{pdf,eps}           -- IEEE single-column figure:
-      lambda_2 vs. NDCG@k directly (the core SIR claim).
-  results/routing_comparison_metrics.csv       -- raw per-hop metrics.
-
-Real-data pipeline (HotpotQA)
--------------------------------
-`run_hotpotqa_experiment` / `main_hotpotqa` swap the synthetic linear-Gaussian
-task above for a real one built on HotpotQA (distractor): each of the 10
-agents is a persistent shard-holder for one of a query's ~10 context
-paragraphs, a frozen lightweight causal LM (distilgpt2) embeds queries and
-paragraphs, and each agent owns a small trainable bilinear retrieval head
-(its "theta") scored against its own shard only. See `main_hotpotqa` for the
-full pipeline; outputs:
-  results/hotpotqa_real_metrics.csv  -- per-hop lambda_2, NDCG@5, F1@5,
-      cumulative Fisher manifold drift, and Pearson r(lambda_2, NDCG@5).
-  figures/hotpotqa_scaling.{pdf,eps} -- IEEE double-column trend figure.
-"""
+"""run evaluation"""
 
 from __future__ import annotations
 
@@ -109,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------
-# Configuration & per-hop metric record
+# config metrics
 # --------------------------------------------------------------------------
 
 @dataclass
@@ -119,9 +65,9 @@ class ExperimentConfig:
     d_out: int = 5
     n_docs: int = 24
     n_hops: int = 5
-    k: int = 5                     # NDCG@k / F1@k
-    diffusion_alpha: float = 0.6   # message-passing blend rate
-    baseline_top_k: int = 3        # GoT-style neighbor count
+    k: int = 5                     # eval depth
+    diffusion_alpha: float = 0.6   # blend rate
+    baseline_top_k: int = 3        # neighbor count
     local_fisher_samples: int = 30
     noise_std: float = 0.01
     seed: int = 42
@@ -137,11 +83,11 @@ class HopMetrics:
 
 
 # --------------------------------------------------------------------------
-# Retrieval metrics
+# retrieval metrics
 # --------------------------------------------------------------------------
 
 def ndcg_at_k(scores: np.ndarray, relevance: np.ndarray, k: int) -> float:
-    """Standard NDCG@k with graded relevance, base-2 log discount."""
+    """compute ndcg"""
     k = min(k, len(scores))
     order = np.argsort(-scores)[:k]
     discounts = 1.0 / np.log2(np.arange(2, k + 2))
@@ -152,7 +98,7 @@ def ndcg_at_k(scores: np.ndarray, relevance: np.ndarray, k: int) -> float:
 
 
 def f1_at_k(scores: np.ndarray, relevance_binary: np.ndarray, k: int) -> float:
-    """F1 of the top-k retrieved set against the binary-relevant set."""
+    """compute f1"""
     k = min(k, len(scores))
     retrieved = set(np.argsort(-scores)[:k].tolist())
     relevant = set(np.where(relevance_binary > 0)[0].tolist())
@@ -167,16 +113,11 @@ def f1_at_k(scores: np.ndarray, relevance_binary: np.ndarray, k: int) -> float:
 
 
 # --------------------------------------------------------------------------
-# Routing graph construction
+# build routing
 # --------------------------------------------------------------------------
 
 def build_baseline_graph(theta_matrix: np.ndarray, nodes: List[str], top_k: int) -> nx.DiGraph:
-    """
-    Graph-of-Thoughts-style baseline: each agent v retrieves from its
-    top_k most cosine-similar peers u (edge u -> v, weight = similarity).
-    Recomputed fresh from the current parameter states every hop; no
-    connectivity-aware filtering is applied.
-    """
+    """baseline graph"""
     X = theta_matrix / (np.linalg.norm(theta_matrix, axis=1, keepdims=True) + 1e-12)
     sim = X @ X.T
     np.fill_diagonal(sim, -np.inf)
@@ -194,15 +135,7 @@ def build_baseline_graph(theta_matrix: np.ndarray, nodes: List[str], top_k: int)
 
 
 def sir_prune_to_budget(G: nx.DiGraph, target_edges: int, zero_tol: float = 1e-9) -> nx.DiGraph:
-    """
-    Spectral filtering step of SIR: starting from a fully Fisher-Rao
-    weighted graph, greedily remove the globally weakest edge, checking
-    lambda_2 (via the normalized Laplacian) after each removal. An edge is
-    only actually dropped if the graph's algebraic connectivity survives;
-    edges that would collapse lambda_2 -> 0 (structural bottlenecks /
-    bridges) are restored -- i.e. weak-but-redundant routing paths are
-    filtered out while critical connectivity is preserved.
-    """
+    """prune budget"""
     H = G.copy()
     target_edges = max(target_edges, H.number_of_nodes() - 1)
     weakest_first = sorted(H.edges(data="weight"), key=lambda e: e[2])
@@ -214,7 +147,7 @@ def sir_prune_to_budget(G: nx.DiGraph, target_edges: int, zero_tol: float = 1e-9
             continue
         H.remove_edge(u, v)
         if compute_pipeline_lambda2(H) < zero_tol:
-            H.add_edge(u, v, weight=w)  # was a structural bottleneck -- keep it
+            H.add_edge(u, v, weight=w)  # keep bottleneck
     return H
 
 
@@ -225,7 +158,7 @@ def build_sir_graph(
     cfg: ExperimentConfig,
     target_edges: int,
 ) -> nx.DiGraph:
-    """Fisher-Rao weighted routing graph, spectrally filtered down to `target_edges`."""
+    """sir graph"""
     thetas: Dict[str, torch.Tensor] = {}
     fishers: Dict[str, torch.Tensor] = {}
 
@@ -248,7 +181,7 @@ def build_sir_graph(
 
 
 # --------------------------------------------------------------------------
-# Shared task setup (identical across both strategies for a fair comparison)
+# shared setup
 # --------------------------------------------------------------------------
 
 def unflatten_into(params: List[nn.Parameter], flat: torch.Tensor) -> None:
@@ -306,7 +239,7 @@ def build_shared_setup(cfg: ExperimentConfig) -> SimpleNamespace:
 
 
 # --------------------------------------------------------------------------
-# Main per-strategy simulation loop
+# run strategy
 # --------------------------------------------------------------------------
 
 def run_experiment(strategy: str, cfg: ExperimentConfig, setup: SimpleNamespace) -> List[HopMetrics]:
@@ -338,12 +271,12 @@ def run_experiment(strategy: str, cfg: ExperimentConfig, setup: SimpleNamespace)
 
         lam2 = compute_pipeline_lambda2(G)
 
-        A = weighted_adjacency(G, nodelist=nodes).toarray()  # A[u, v] = weight of edge u -> v
+        A = weighted_adjacency(G, nodelist=nodes).toarray()  # edge weight
         in_deg = A.sum(axis=0)
         P = np.zeros_like(A)
         receiving = in_deg > 1e-12
         P[:, receiving] = A[:, receiving] / in_deg[receiving]
-        incoming_avg = P.T @ Theta  # incoming_avg[v] = sum_u P[u, v] * Theta[u]
+        incoming_avg = P.T @ Theta  # weighted average
 
         Theta_new = Theta.copy()
         Theta_new[receiving] = (
@@ -383,11 +316,11 @@ def run_experiment(strategy: str, cfg: ExperimentConfig, setup: SimpleNamespace)
 
 
 # --------------------------------------------------------------------------
-# IEEE two-column publication-ready plotting
+# make plots
 # --------------------------------------------------------------------------
 
-IEEE_COLUMN_WIDTH_IN = 3.45   # single-column figure width
-IEEE_PAGE_WIDTH_IN = 7.16     # double-column (full-page) figure width
+IEEE_COLUMN_WIDTH_IN = 3.45   # single column
+IEEE_PAGE_WIDTH_IN = 7.16     # double column
 
 
 def _set_ieee_style() -> None:
@@ -407,7 +340,7 @@ def _set_ieee_style() -> None:
         "grid.linewidth": 0.4,
         "grid.alpha": 0.3,
         "axes.grid": True,
-        "pdf.fonttype": 42,   # embed as TrueType, not Type-3 (IEEE PDF/A compliance)
+        "pdf.fonttype": 42,   # embed fonts
         "ps.fonttype": 42,
         "svg.fonttype": "none",
         "figure.dpi": 300,
@@ -475,7 +408,7 @@ def plot_ieee_figures(
 
 
 # --------------------------------------------------------------------------
-# Reporting
+# print summary
 # --------------------------------------------------------------------------
 
 def save_results_csv(
@@ -512,38 +445,38 @@ def print_summary(baseline_hist: List[HopMetrics], sir_hist: List[HopMetrics]) -
 
 
 # --------------------------------------------------------------------------
-# Real-data pipeline: HotpotQA (distractor) sharded multi-agent retrieval
+# hotpotqa pipeline
 # --------------------------------------------------------------------------
 #
-# Task mapping: each of the 10 agents is a *persistent* shard-holder for one
-# "slot" (0..9) of every evaluated question's up-to-10 context paragraphs
-# (HotpotQA's distractor config always ships exactly 2 gold + up-to-8
-# distractor paragraphs per question). A frozen lightweight causal LM
-# produces fixed embeddings for questions and paragraphs; those are
-# projected down to a small dimension and fed through each agent's own
-# trainable bilinear head (its theta). An agent scores ONLY the paragraphs
-# in its own shard (no cross-shard access at inference time), so
-# population-level retrieval quality can only improve if useful information
-# about *other* agents' local Fisher geometry propagates through the
-# routing graph -- exactly the effect SIR is designed to preserve.
+# shard mapping
+# context slots
+# gold distractors
+# frozen encoder
+# fixed embeddings
+# project embeddings
+# trainable head
+# own shard
+# shared routing
+# propagate geometry
+# preserve routing
 
 @dataclass
 class RealDataConfig:
     n_agents: int = 10
     n_eval_queries: int = 40
     n_hops: int = 5
-    k: int = 5                      # NDCG@k / F1@k
+    k: int = 5                      # eval depth
     diffusion_alpha: float = 0.6
     baseline_top_k: int = 3
     noise_std: float = 0.005
     seed: int = 42
     lm_checkpoint: str = "distilgpt2"
-    proj_dim: int = 32              # frozen random projection -> lightweight trainable head size
+    proj_dim: int = 32              # projection dim
     embed_batch_size: int = 16
     max_seq_len: int = 96
-    device: str = "cpu"             # device for the frozen encoder's forward pass only
-    sir_gamma: Optional[float] = None  # None -> auto_kernel_gamma (median heuristic); else fixed kernel bandwidth
-    sir_top_k: int = 3               # row-wise cap on outgoing SIR edges per agent (also used as baseline_top_k budget)
+    device: str = "cpu"             # encoder device
+    sir_gamma: Optional[float] = None  # kernel gamma
+    sir_top_k: int = 3               # edge budget
     dataset_slice: str = "validation[:1000]"
 
 
@@ -554,16 +487,16 @@ class HotpotHopMetrics:
     ndcg_at_k: float
     f1_at_k: float
     cumulative_d_ig: float
-    # Theorem 1 diagnostics (see theorem1_diagnostics.py for exact definitions/caveats):
+    # theorem diagnostics
     delta_ig_sq: float = 0.0
     non_consensus_variance: Optional[float] = None
     theorem1_bound: float = 0.0
-    # Gold-vs-distractor routing mass diagnostic:
+    # routing mass
     gold_inflow_mass: float = float("nan")
     distractor_inflow_mass: float = float("nan")
     gold_distractor_ratio: float = float("nan")
     mean_transition_entropy: float = 0.0
-    # Score-margin diagnostic (see margin_diagnostics.py):
+    # margin diagnostic
     mean_margin: float = float("nan")
     mean_hard_margin: float = float("nan")
     margin_violation_rate: float = float("nan")
@@ -572,13 +505,7 @@ class HotpotHopMetrics:
 
 
 def _load_hotpotqa_shards(cfg: RealDataConfig) -> List[dict]:
-    """
-    Load HotpotQA (distractor) and keep the first `n_eval_queries` examples
-    with at least `n_agents` context paragraphs. Each returned record:
-    {question, paragraphs (list[str], len == n_agents),
-    relevance (np.ndarray binary, len == n_agents)} -- relevance[j] = 1 iff
-    paragraph j's title is one of the question's real `supporting_facts`.
-    """
+    """load hotpotqa"""
     if not _DATASETS_AVAILABLE:
         raise ImportError("The `datasets` package is required for the HotpotQA pipeline (pip install datasets).")
 
@@ -616,12 +543,7 @@ def _load_hotpotqa_shards(cfg: RealDataConfig) -> List[dict]:
 
 @torch.no_grad()
 def _embed_texts(model, tokenizer, texts: List[str], cfg: RealDataConfig) -> torch.Tensor:
-    """Mean-pool the frozen LM's last hidden state (masking padding) into one vector per text.
-
-    The encoder forward pass runs on `cfg.device` (e.g. "cuda") for throughput;
-    pooled embeddings are always returned on CPU since every downstream
-    consumer (agent heads, Fisher computation, graph diffusion) is CPU/numpy.
-    """
+    """embed texts"""
     device = torch.device(cfg.device)
     all_embeds = []
     for start in range(0, len(texts), cfg.embed_batch_size):
@@ -630,24 +552,15 @@ def _embed_texts(model, tokenizer, texts: List[str], cfg: RealDataConfig) -> tor
             batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=cfg.max_seq_len
         )
         enc = {k: v.to(device) for k, v in enc.items()}
-        hidden = model(**enc).last_hidden_state  # (B, T, H)
-        mask = enc["attention_mask"].unsqueeze(-1).float()  # (B, T, 1)
+        hidden = model(**enc).last_hidden_state  # shape hint
+        mask = enc["attention_mask"].unsqueeze(-1).float()  # shape hint
         pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1.0)
         all_embeds.append(pooled.cpu())
     return torch.cat(all_embeds, dim=0)
 
 
 def retrieval_log_likelihood(head: nn.Module, example: Dict[str, torch.Tensor]) -> torch.Tensor:
-    """
-    Local (single-example) Bernoulli log-likelihood of a document's binary
-    relevance under a bilinear score head(q) . head(doc):
-
-        log p_theta(y | q, doc) = -softplus(-(2y - 1) * score)
-
-    This is the "gradient logs" source for this pipeline: autograd through
-    this scalar w.r.t. head's own parameters gives grad_theta log p_theta(y|x)
-    for one (query, document) pair, on top of frozen LM features.
-    """
+    """score likelihood"""
     q = head(example["e_q"])
     d = head(example["e_doc"])
     score = (q * d).sum(dim=-1)
@@ -658,7 +571,7 @@ def retrieval_log_likelihood(head: nn.Module, example: Dict[str, torch.Tensor]) 
 def _build_agent_shards(
     cfg: RealDataConfig, records: List[dict], q_embeds: torch.Tensor, doc_embeds: torch.Tensor
 ) -> List[List[Dict[str, torch.Tensor]]]:
-    """Agent j's persistent shard: one local (query, its own paragraph j, relevance) example per question."""
+    """build shards"""
     shards: List[List[Dict[str, torch.Tensor]]] = [[] for _ in range(cfg.n_agents)]
     for i, rec in enumerate(records):
         for j in range(cfg.n_agents):
@@ -694,15 +607,15 @@ def run_hotpotqa_experiment(
 
     history: List[HotpotHopMetrics] = []
     cumulative_d_ig = 0.0
-    theorem1_B = 0.0  # running B(h) via the recursion B(h) = (1-lambda2_h)^2 * B(h-1) + Delta_IG_h
+    theorem1_B = 0.0  # theorem recursion
 
     for hop in range(1, cfg.n_hops + 1):
         torch.manual_seed(cfg.seed * 7919 + hop)
         np.random.seed(cfg.seed * 7919 + hop)
 
-        # Local diagonal Fisher per agent, from its persistent shard. Used
-        # for SIR routing, and (for both strategies) as the metric tensor
-        # for the cumulative Fisher manifold drift diagnostic below.
+        # local fisher
+        # metric tensor
+        # drift metric
         thetas: Dict[str, torch.Tensor] = {}
         fishers: Dict[str, torch.Tensor] = {}
         for j, name in enumerate(nodes):
@@ -714,31 +627,31 @@ def run_hotpotqa_experiment(
         if strategy == "baseline":
             G = build_baseline_graph(Theta, nodes, top_k=cfg.baseline_top_k)
         else:
-            # Real parameter/Fisher magnitudes vary wildly by checkpoint --
-            # calibrate the kernel bandwidth so W doesn't uniformly underflow
-            # to 0 (which would silently yield a fully edgeless graph), unless
-            # the caller pinned a fixed gamma (sharper kernel -> faster
-            # falloff -> less diffusion mass spread across distractor nodes).
+            # calibrate kernel
+            # avoid underflow
+            # avoid edgeless
+            # fixed gamma
+            # less diffusion
             gamma = cfg.sir_gamma if cfg.sir_gamma is not None else auto_kernel_gamma(thetas, fishers, diagonal=True)
             W, node_order = fisher_rao_edge_weights(
                 thetas, fishers, diagonal=True, symmetrize="average", zero_diagonal=True, gamma=gamma
             )
-            # Row-wise top-k: cap each agent's outgoing routing mass to its k
-            # strongest Fisher-Rao partners *before* building the graph, so a
-            # dense kernel can't diffuse a node's mass across all 9 peers.
+            # cap outgoing
+            # top partners
+            # limit spread
             W = sparsify_top_k(W, k=cfg.sir_top_k)
             G_full = weights_to_digraph(W, node_order, weight_floor=1e-9)
-            # Safety net, not the primary sparsifier now: only removes edges
-            # further if top-k somehow left more than the target budget, and
-            # restores any edge whose removal would collapse lambda_2 -> 0.
+            # safety net
+            # extra pruning
+            # protect connectivity
             G = sir_prune_to_budget(G_full, target_edges=n * cfg.sir_top_k)
 
         lam2 = compute_pipeline_lambda2(G)
 
-        # Theorem 1, LHS input: Delta_IG^(h), the max squared Fisher-Rao
-        # distance across this hop's *actual* routing edges, using the
-        # pre-diffusion-update agent states (the perturbation available to
-        # inject at this hop).
+        # theorem lhs
+        # hop distance
+        # pre update
+        # this hop
         delta_ig_sq = max_edge_geodesic_distance_sq(G, thetas, fishers, diagonal=True)
         contraction = max(0.0, 1.0 - lam2) ** 2
         theorem1_B = contraction * theorem1_B + delta_ig_sq
@@ -761,15 +674,15 @@ def run_hotpotqa_experiment(
         Theta_new += cfg.noise_std * np.random.randn(*Theta_new.shape)
         Theta = Theta_new
 
-        # Theorem 1, RHS/LHS-check input: ||Pi_perp x^(h)||_2^2 evaluated
-        # on the *post*-update state against *this hop's* consensus
-        # subspace (see theorem1_diagnostics.py for the connected-graph
-        # caveat -- None when this hop's graph has zero total degree).
+        # theorem check
+        # post update
+        # consensus subspace
+        # edgeless caveat
         ncv = non_consensus_variance(Theta, A_sym)
 
-        # Cumulative Fisher manifold drift: geodesic distance each agent
-        # actually moved this hop under F(theta) at its pre-update state,
-        # averaged over agents and accumulated across hops.
+        # cumulative drift
+        # agent movement
+        # accumulate hops
         hop_d_ig = 0.0
         for j, name in enumerate(nodes):
             d_ig = geodesic_distance(
@@ -793,9 +706,9 @@ def run_hotpotqa_experiment(
                 f1s.append(f1_at_k(scores, (rec["relevance"] > 0).astype(np.float64), cfg.k))
                 per_query_scores.append(scores)
 
-        # Score-margin diagnostic: uses the *same* per-query scores just
-        # computed for NDCG/F1, so it's measuring margin compression in
-        # the exact logits that determine this hop's ranking quality.
+        # margin diagnostic
+        # reuse scores
+        # ranking logits
         margin_diag = aggregate_margin_diagnostics(records, per_query_scores)
 
         history.append(HotpotHopMetrics(
@@ -827,7 +740,7 @@ def run_hotpotqa_experiment(
 
 
 def _pearson_r(x: List[float], y: List[float]) -> float:
-    """np.corrcoef wrapper returning NaN instead of raising/warning on a degenerate (zero-variance) series."""
+    """safe correlation"""
     return float(np.corrcoef(x, y)[0, 1]) if len(x) > 1 and np.std(x) > 0 and np.std(y) > 0 else float("nan")
 
 
@@ -842,10 +755,10 @@ def save_hotpotqa_results_csv(
     s_lam2 = [m.lambda2 for m in sir_hist]
     s_ndcg = [m.ndcg_at_k for m in sir_hist]
 
-    # Pooled correlation mixes two different (strategy, hop) -> (lambda2, NDCG)
-    # relationships into one number, which can reverse sign vs. either
-    # strategy's own within-series trend (Simpson's paradox) -- report all
-    # three, not just the pooled figure, so that isn't hidden.
+    # pooled correlation
+    # sign reversal
+    # simpsons paradox
+    # report all
     corr_pooled = _pearson_r(b_lam2 + s_lam2, b_ndcg + s_ndcg)
     corr_baseline = _pearson_r(b_lam2, b_ndcg)
     corr_sir = _pearson_r(s_lam2, s_ndcg)
@@ -869,12 +782,7 @@ def save_hotpotqa_results_csv(
 def save_theorem1_diagnostics_csv(
     baseline_hist: List[HotpotHopMetrics], sir_hist: List[HotpotHopMetrics], out_dir: str = "results"
 ) -> str:
-    """
-    Per-hop Theorem 1 quantities and the gold-vs-distractor routing mass
-    diagnostic, for both strategies. See theorem1_diagnostics.py for exact
-    definitions and the two operationalization caveats (scalar-signal ->
-    Frobenius-norm generalization; idealized vs. actual damped dynamics).
-    """
+    """save theorem"""
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "hotpotqa_theorem1_diagnostics.csv")
 
@@ -904,7 +812,7 @@ def save_theorem1_diagnostics_csv(
 def save_margin_diagnostics_csv(
     baseline_hist: List[HotpotHopMetrics], sir_hist: List[HotpotHopMetrics], out_dir: str = "results"
 ) -> str:
-    """Per-hop gold-vs-distractor score-margin diagnostic. See margin_diagnostics.py."""
+    """save margins"""
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "hotpotqa_margin_diagnostics.csv")
 
@@ -1003,8 +911,8 @@ def main_hotpotqa(
     if gamma is not None:
         cfg.sir_gamma = gamma
     if top_k is not None:
-        # Single knob for both strategies' edge budget, so SIR isn't
-        # compared against a baseline given a different neighbor count.
+        # shared budget
+        # fair comparison
         cfg.sir_top_k = top_k
         cfg.baseline_top_k = top_k
 
@@ -1031,19 +939,19 @@ def main_hotpotqa(
     questions = [r["question"] for r in records]
     all_paragraphs = [p for r in records for p in r["paragraphs"]]
 
-    q_hidden = _embed_texts(encoder, tokenizer, questions, cfg)        # (N, H)
-    doc_hidden = _embed_texts(encoder, tokenizer, all_paragraphs, cfg)  # (N * n_agents, H)
+    q_hidden = _embed_texts(encoder, tokenizer, questions, cfg)        # shape hint
+    doc_hidden = _embed_texts(encoder, tokenizer, all_paragraphs, cfg)  # shape hint
 
     hidden_dim = q_hidden.shape[1]
     proj_gen = torch.Generator().manual_seed(cfg.seed)
     projection = torch.randn(hidden_dim, cfg.proj_dim, generator=proj_gen) / math.sqrt(hidden_dim)
 
-    q_embeds = q_hidden @ projection       # (N, proj_dim)
-    doc_embeds = doc_hidden @ projection   # (N * n_agents, proj_dim)
+    q_embeds = q_hidden @ projection       # shape hint
+    doc_embeds = doc_hidden @ projection   # shape hint
 
     shards = _build_agent_shards(cfg, records, q_embeds, doc_embeds)
 
-    # Identical initial agent-head parameters across both strategies.
+    # shared init
     init_state_dicts = []
     for j in range(cfg.n_agents):
         gj = torch.Generator().manual_seed(cfg.seed * 1000 + j)
@@ -1064,7 +972,7 @@ def main_hotpotqa(
 
 
 # --------------------------------------------------------------------------
-# Entry point
+# run pipeline
 # --------------------------------------------------------------------------
 
 def main() -> None:
