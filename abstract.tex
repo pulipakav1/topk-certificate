@@ -1,0 +1,30 @@
+\begin{abstract}
+Multi-agent retrieval systems that route information through similarity graphs
+typically weight edges by embedding-space proximity, ignoring the geometry of
+the underlying consensus process itself. We introduce Spectral Information
+Routing (SIR), which weights the inter-agent communication graph using
+Fisher--Rao geodesic distances between agents' local likelihood geometries
+rather than cosine similarity, and establish a spectral bound (Theorem~1)
+relating post-diffusion non-consensus representation variance to the graph's
+algebraic connectivity ($\lambda_2$) and the per-hop Fisher-information gap.
+We validate this bound on the full HotpotQA distractor validation set (989
+multi-hop QA queries, 5 diffusion hops) against a cosine-similarity
+Graph-of-Thoughts baseline under matched edge budgets. SIR reliably increases
+algebraic connectivity and reduces cumulative Fisher-manifold drift relative
+to baseline, and routes roughly 5\% more probability mass to gold-evidence
+agents. However, this structural improvement does not translate into better
+discrete retrieval ranking: SIR consistently underperforms baseline on
+NDCG@5 and F1@5 (0.3403 vs.\ 0.3516 and 0.2666 vs.\ 0.2817, respectively),
+and per-query $z$-standardized score-margin analysis shows the gap is a
+static offset present from the first hop rather than a cumulative, hop-wise
+degradation. Theorem~1's bound holds with wide slack at every hop for both
+strategies. Together these results substantiate the spectral bound while
+exposing a structural misalignment between continuous Fisher-manifold
+consensus objectives and discrete rank-ordered retrieval objectives -- a gap
+hyperparameter tuning alone cannot close.
+\end{abstract}
+
+\begin{IEEEkeywords}
+multi-agent systems, spectral graph theory, Fisher information geometry,
+information retrieval, algebraic connectivity, HotpotQA
+\end{IEEEkeywords}
