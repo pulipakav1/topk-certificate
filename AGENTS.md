@@ -4,22 +4,22 @@
 
 This repository supports the paper **“Certifying Top-k Retrieval Stability under Multi-Agent Communication.”** It studies whether a deterministic one-hop consensus update of agent-specific, bias-free bilinear retrieval heads can change a query’s retrieved top-*k*. Its contribution is a sufficient, predictive certificate computed from the **pre-update** scores, parameters, and proposed parameter update; it is not a claim about general end-to-end retriever training or multi-hop QA accuracy.
 
-The current repository also preserves older, separate synthetic and HotpotQA Fisher/SIR routing experiments. They are historical/auxiliary and must not be conflated with the paper’s top-*k* certificate pipeline.
+Earlier synthetic and HotpotQA Fisher/SIR routing experiments have been removed from the code; they survive only in git history and in the retained `results/`/`figures/` artifacts, which must not be conflated with the paper’s top-*k* certificate pipeline.
 
 ## Repository map
 
-- `evaluation_harness.py` — primary entry point. Contains synthetic and legacy SIR pipelines plus the top-*k* experiment, sweeps, CSV writers, and CLI. The dataset-to-numerical-runner integration has an embedding-shape defect described below.
+- `evaluation_harness.py` — primary entry point. Contains the top-*k* experiment, sweeps, CSV writers, and CLI. The dataset-to-numerical-runner integration has an embedding-shape defect described below.
 - `topk_stability.py` — certificate math, top-*k* helpers, score-change bounds, and aggregate diagnostics.
 - `dataset_loaders.py` — HotpotQA, MuSiQue, and 2WikiMultiHopQA adapters and candidate-pool construction.
 - `model_adapters.py` — checkpoint-specific query/passage formatting and pooling.
 - `numerical_bounds.py` — CPU float64 scoring, outward-rounded operator-norm enclosures, and score-roundoff envelopes.
 - `run_provenance.py` — per-run manifests, source hashes, pre/post-update artifact provenance, and completion hashes.
 - `corrected_results.py`, `artifact_index.py` — result metadata/integrity checks and an inventory separating historical artifacts from current-protocol runs. These checks do not establish scientific validity or authenticate arbitrary copied input CSVs.
-- `verify_invariants.py` — 58 manually runnable invariant checks, also explicitly discovered by the pytest configuration in `pyproject.toml`.
+- `verify_invariants.py` — 50 manually runnable invariant checks, also explicitly discovered by the pytest configuration in `pyproject.toml`.
 - `tests/` — certificate, pipeline, candidate, CLI, and numerical regression/property tests. The pipeline fixtures use one-dimensional embeddings and do not exercise the real preparation boundary.
 - `analyze_results.py` — reads explicitly selected current-protocol CSVs through `corrected_results.py`; writes `summary.csv` and `SUMMARY.md` to a new directory.
 - `plots.py` — reads explicitly selected current-protocol CSVs and writes one PNG per run to a new directory.
-- `agent_retrieval_graph.py`, `fisher_information_geometry.py`, `theorem1_diagnostics.py`, `margin_diagnostics.py` — legacy graph/Fisher/SIR support and diagnostics.
+- `graph_connectivity.py` — weighted adjacency and the consensus graph's algebraic connectivity `lambda2` (a reported diagnostic; ARPACK's unseeded start vector can change its last bits between identical runs).
 - `results/full_sweep_results.csv`, `results/full_sweep_per_query.csv`, `results/candidate_pool_ablation.csv` — historical artifacts without the metadata required by the current analysis/plot readers; do not mix them with current-protocol runs.
 - `results/tables/`, `results/PAPER_RESULTS_SUMMARY.md`, `figures/topk_stability/` — derived artifacts, never primary raw evidence.
 - `abstract.tex` — draft paper abstract. The certificate implication chain is corrected; its empirical numbers still come from an unprovenanced pre-audit run and are marked pending revalidation in a source comment.
@@ -72,7 +72,7 @@ These guarantees cover only the deterministic consensus proposal. They do not co
 ## Critical invariants
 
 - Compute and persist certificate decision inputs from `scores_old`, `Theta_old`, and the deterministic `Theta_consensus - Theta_old` before assigning `Theta` or obtaining `scores_new`.
-- All current certificate entry points require `noise_std=0` and reject other values, including NaN/infinity. There is no noisy certificate-run mode. Preserved legacy pipelines have separate noise behavior outside this guarantee.
+- All current certificate entry points require `noise_std=0` and reject other values, including NaN/infinity. There is no noisy certificate-run mode.
 - Certificate heads must be `nn.Linear(..., bias=False)`; adding a bias changes the proof and bound.
 - Use the operator 2-norm, not Frobenius/vector norms, for `W` and `DeltaW`.
 - Candidate relevance/gold labels may evaluate retrieval and construct an evaluation pool, but must never enter graph construction, consensus, `DeltaW`, bounds, or certificate decisions.
@@ -141,7 +141,7 @@ Current numerical runs always create a fresh run directory with schema-3 manifes
 
 Provenance remains incomplete: query/document identities, assembled text, frozen embeddings, graph matrices, and test/configuration source snapshots are not persisted; dataset revisions are requested values rather than independently resolved immutable revisions. Cached adapter metadata can supply a checkpoint revision even for synthetic fixtures that never ran an encoder. CSVs contain absolute manifest paths. The reader checks referenced run hashes and matching metadata, but does not bind an arbitrary input CSV's metric values to the hashed canonical CSV. Completion/inventory status is not scientific validation. Existing current-protocol artifacts are development/smoke fixtures, not a paper sweep.
 
-Never overwrite historical `results/` or `figures/`; use a new timestamped output directory. Current certificate writers use exclusive creation. Legacy synthetic/HotpotQA entry points still default to overwriting historical results/figures, so do not invoke those entry points during certificate maintenance.
+Never overwrite historical `results/` or `figures/`; use a new timestamped output directory. Current certificate writers use exclusive creation.
 
 ## Testing requirements
 
@@ -155,11 +155,9 @@ Before committing certificate or pipeline changes:
 
 ## Do not do these things
 
-- Do not alter or delete the preserved SIR/Fisher pipeline while working on the certificate pipeline.
 - Do not use `scores_new`, post-update parameters, or gold labels to decide certification.
 - Do not report noisy runs as certified/theoretical results.
 - Graph neighbour ties break by ascending agent index and retrieval ties by ascending candidate slot; both use stable sorts. Do not reintroduce an unstable sort.
-- The historical Fisher/SIR writers default to a fresh `runs/legacy/` directory and refuse to overwrite. Do not point them back at `results/` or `figures/`.
 - Do not silently alter candidate construction, passage de-duplication, padding, formatting, pooling, normalization, or the 96-token cap.
 - Do not overwrite historical result files or derived tables/figures.
 - Do not replace spectral norms, relax strict inequalities, or add head bias without revising the proof, tests, and paper.

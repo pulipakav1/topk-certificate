@@ -1,5 +1,6 @@
 """A run may only call itself `paper` when its provenance is complete."""
 
+import hashlib
 import json
 
 import numpy as np
@@ -159,3 +160,24 @@ def test_paper_sweeps_require_one_repository_per_invocation(clean_tree, monkeypa
         harness.main_full_sweep(run_options=options, retrievers=["intfloat/e5-small-v2"])
     with pytest.raises(ValueError, match="one retriever per invocation"):
         harness.main_full_sweep(run_options=options, datasets=["hotpotqa"])
+
+
+def test_git_state_reads_a_non_ascii_diff(tmp_path, monkeypatch):
+    """git output is UTF-8; decoding it with the Windows code page lost stdout."""
+    import subprocess
+
+    def git(*args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                       cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "note.md").write_text("plain\n", encoding="utf-8")
+    git("add", "note.md")
+    git("commit", "-q", "-m", "init")
+    # U+201D encodes to e2 80 9d; 0x9d has no cp1252 character.
+    (tmp_path / "note.md").write_text("a “quoted” note\n", encoding="utf-8")
+    monkeypatch.setattr(run_provenance, "__file__", str(tmp_path / "run_provenance.py"))
+    state = run_provenance.git_state()
+    assert state["commit"] and state["dirty"] is True
+    assert "note.md" in state["status"]
+    assert state["diff_sha256"] != hashlib.sha256(b"").hexdigest()

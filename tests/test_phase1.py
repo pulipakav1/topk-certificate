@@ -206,10 +206,10 @@ def test_cli_separates_graph_neighbors_and_retrieval_depth():
     args = harness.parse_args(["--pipeline", "topk-stability", "--graph-neighbors", "1", "--retrieval-k", "2"])
     assert args.top_k == 1 and args.retrieval_k == 2
     with pytest.warns(FutureWarning, match="deprecated"):
-        old = harness.parse_args(["--top-k", "4"])
+        old = harness.parse_args(["--pipeline", "topk-stability", "--top-k", "4"])
     assert old.top_k == 4 and old.retrieval_k is None
     with pytest.raises(SystemExit):
-        harness.parse_args(["--top-k", "4", "--graph-neighbors", "3"])
+        harness.parse_args(["--pipeline", "topk-stability", "--top-k", "4", "--graph-neighbors", "3"])
 
 
 def test_audit_written_before_mutation_and_all_csvs_record_noise(tmp_path, monkeypatch):

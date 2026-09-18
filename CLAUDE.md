@@ -55,7 +55,6 @@ claim that each certificate implies the next; only `global => pairwise` and
 - Certificate-validation experiments require `noise_std = 0`. Noise is rejected
   before any dataset load, model load, or head mutation.
 - Heads used by the certificate model are bias-free (`nn.Linear(..., bias=False)`).
-  The legacy Fisher/SIR path uses biased heads; that is a different model.
 - The operator 2-norm is used. `spectral_norm_upper` returns a validated upward
   enclosure of it. Matrix 1/infinity norms appear only to bound numerical
   residuals, never as the score bound itself.
@@ -92,9 +91,7 @@ claim that each certificate implies the next; only `global => pairwise` and
   never loaded an encoder `development_fixture`, and leaves `results/`/`figures/`
   as `legacy_unverified`.
 - Nothing overwrites an existing output. Certificate runs open every artifact
-  with mode `x`; the historical Fisher/SIR writers now do too and default to a
-  fresh `runs/legacy/<pipeline>_<timestamp>_*` directory instead of `results/`
-  and `figures/`.
+  with mode `x`.
 - A run directory is relocatable but keeps its name. Exports cite their manifest
   relative to themselves, and `validate_run` still requires the directory name to
   equal the `run_id`.
@@ -103,16 +100,19 @@ claim that each certificate implies the next; only `global => pairwise` and
 - Degenerate settings are rejected before a run directory exists: non-finite
   `diffusion_alpha`, `n_hops < 1`, `n_eval_queries < 1`, negative
   `baseline_top_k`, and `k` outside `0 < k < n_agents`.
-- Old Fisher/SIR code (`fisher_information_geometry.py`,
-  `theorem1_diagnostics.py`, `margin_diagnostics.py`, `agent_retrieval_graph.py`,
-  and the synthetic / `main_hotpotqa` paths in the harness) is historical. Do not
-  casually modify it.
+- The earlier Fisher/SIR routing experiments (synthetic agents, DistilGPT2
+  HotpotQA, Fisher-Rao edge weights) have been removed from the code. They exist
+  only in git history and in the retained `results/`/`figures/` artifacts.
+- `lambda2` is a reported graph diagnostic, not an input to any decision. ARPACK
+  starts `eigsh` from an unseeded vector, so it can differ in the last bits
+  between identical runs.
 
 ## Repository map
 
 | File | Role |
 | --- | --- |
-| `evaluation_harness.py` | Orchestration: configs, dataset preparation, embedding, graph construction, the certificate experiment loop, CSV writers, CLI. Also holds the historical synthetic and Fisher/SIR pipelines. |
+| `evaluation_harness.py` | Orchestration: configs, dataset preparation, embedding, graph construction, the certificate experiment loop, CSV writers, CLI. |
+| `graph_connectivity.py` | Weighted adjacency and the algebraic connectivity `lambda2` of the consensus graph. |
 | `topk_stability.py` | Certificate core: `full_certificate`, `validate_certificate`, `CertificateDecision`, bound helpers, aggregation. |
 | `numerical_bounds.py` | Outward-rounded float64 enclosures: `spectral_norm_upper`, `update_norm_upper`, `bilinear_score`, `score_roundoff_bound`, `certified_bounds`. |
 | `dataset_loaders.py` | The three datasets, `RawExample`, and candidate-pool assembly with the gold-preservation rules. |
@@ -256,8 +256,6 @@ What the suites protect:
 - `tests/test_adapters.py` — each retriever's formatting, pooling, normalization
   and 384-dimensional output checked against the real cached encoder; skipped for
   an uncached checkpoint.
-- `tests/test_legacy_outputs.py` — the historical Fisher/SIR writers refuse to
-  replace an existing CSV or figure, and default to a fresh directory.
 - `tests/test_artifact_index.py` — a verified run with no loaded encoder is
   labelled `development_fixture`, a sweep parent is a command record, and
   retained results stay `legacy_unverified`.
@@ -265,8 +263,8 @@ What the suites protect:
 `tests/conftest.py` also fails any test that leaves a file behind in the
 repository's `runs/`, `results/` or `figures/`: a run directory is provenance, and
 a test fixture there is indistinguishable from a real certificate run in the
-inventory. Tests that call `run_topk_stability_experiment` or a legacy writer must
-point their output at a `tmp_path`.
+inventory. Tests that call `run_topk_stability_experiment` must point their output
+at a `tmp_path`.
 
 ## Working rules
 

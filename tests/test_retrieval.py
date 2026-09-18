@@ -47,8 +47,7 @@ def test_loader_to_certificate(dataset, retriever, tmp_path, monkeypatch):
     monkeypatch.setattr(harness.AutoModel, "from_pretrained", lambda *a, **kw: Encoder())
     cfg = harness.TopKStabilityConfig(dataset=dataset, lm_checkpoint=retriever,
         n_agents=3, proj_dim=2, k=2, n_hops=1, n_eval_queries=1, run_dir=str(tmp_path))
-    records, shards, states = harness._prepare_hotpotqa_run(
-        cfg, bias=False, identity_init=True, dataset=dataset)
+    records, shards, states = harness._prepare_certificate_run(cfg)
     assert texts_seen[0] == format_query(retriever, "question")
     assert set(texts_seen[1:]) == {format_passage(retriever, f"{t}: {x}") for t, x in paragraphs}
     assert records[0]["relevance"].sum() == 2

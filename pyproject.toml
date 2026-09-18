@@ -20,8 +20,7 @@ dev = ["ruff"]
 py-modules = [
     "evaluation_harness", "topk_stability", "numerical_bounds", "dataset_loaders",
     "model_adapters", "run_provenance", "corrected_results", "artifact_index",
-    "agent_retrieval_graph", "fisher_information_geometry", "theorem1_diagnostics",
-    "margin_diagnostics", "analyze_results", "plots", "verify_invariants", "phase1_smoke",
+    "graph_connectivity", "analyze_results", "plots", "verify_invariants", "phase1_smoke",
 ]
 
 [tool.ruff]

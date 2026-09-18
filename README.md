@@ -188,7 +188,8 @@ CSV without that chain is readable only with `allow_legacy=True` and is marked
 
 | File | Role |
 | --- | --- |
-| `evaluation_harness.py` | Configs, dataset preparation, embedding, graph construction, the certificate loop, CSV writers, CLI. Also holds the historical synthetic and Fisher/SIR pipelines. |
+| `evaluation_harness.py` | Configs, dataset preparation, embedding, graph construction, the certificate loop, CSV writers, CLI. |
+| `graph_connectivity.py` | Weighted adjacency and the consensus graph's algebraic connectivity. |
 | `topk_stability.py` | `full_certificate`, `validate_certificate`, `CertificateDecision`, bound helpers, aggregation. |
 | `numerical_bounds.py` | Outward-rounded float64 enclosures and the derivation behind them. |
 | `dataset_loaders.py` | The three datasets and candidate-pool assembly with the gold-preservation rules. |
