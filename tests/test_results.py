@@ -10,6 +10,7 @@ import torch
 
 import evaluation_harness as harness
 from corrected_results import load_corrected, summarize
+from run_provenance import git_state
 
 
 @pytest.fixture
@@ -61,7 +62,8 @@ def test_valid_canonical_and_export_results(result_run, tmp_path):
     assert "pairwise_certificate_violations" in summary
     assert "bound_holds_rate" in summary
     manifest = json.loads((original.parent / "manifest.json").read_text())
-    assert manifest["git"]["commit"] and manifest["git"]["dirty"] is True
+    # The manifest records the tree as it is; a clean checkout is not dirty.
+    assert manifest["git"]["commit"] and manifest["git"]["dirty"] is git_state()["dirty"]
 
 
 def test_run_tree_can_be_moved(result_run, tmp_path):
