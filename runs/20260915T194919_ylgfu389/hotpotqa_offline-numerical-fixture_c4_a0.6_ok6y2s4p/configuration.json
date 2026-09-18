@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "configuration": {
+    "dataset": "hotpotqa",
+    "n_agents": 4,
+    "n_eval_queries": 1,
+    "n_hops": 2,
+    "k": 2,
+    "diffusion_alpha": 0.6,
+    "baseline_top_k": 3,
+    "noise_std": 0.0,
+    "seed": 42,
+    "lm_checkpoint": "offline-numerical-fixture",
+    "proj_dim": 2,
+    "embed_batch_size": 16,
+    "max_seq_len": 96,
+    "device": "cpu",
+    "dataset_slice": null,
+    "run_dir": "C:\\Users\\prohi\\OneDrive\\Documents\\Desktop\\math paper\\runs\\20260915T194919_ylgfu389"
+  },
+  "command": [
+    "phase1_smoke.py"
+  ],
+  "python": "3.14.2 (tags/v3.14.2:df79316, Dec  5 2025, 17:18:21) [MSC v.1944 64 bit (AMD64)]",
+  "packages": {
+    "numpy": "2.4.1",
+    "torch": "2.10.0+cu126",
+    "scipy": "1.17.0",
+    "networkx": "3.6.1",
+    "matplotlib": "3.10.8",
+    "pandas": "2.3.3",
+    "datasets": "4.7.0",
+    "transformers": "4.57.6"
+  },
+  "ranking_policy": "descending score, ascending candidate-slot ID (stable sort)",
+  "model_revision": null,
+  "dataset_revision": null
+}

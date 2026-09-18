@@ -1,0 +1,41 @@
+[project]
+name = "topk-retrieval-stability"
+version = "0.1.0"
+description = "Offline certificate checks and multi-agent retrieval experiments"
+requires-python = ">=3.10"
+# Only packages this repository imports are declared, without version ranges: no
+# compatibility range has been established. requirements.txt pins the environment
+# the test suite and the smoke checks were actually run in.
+dependencies = [
+    "numpy", "torch", "scipy", "networkx", "matplotlib",
+]
+
+[project.optional-dependencies]
+retrieval = ["datasets", "transformers"]
+reporting = ["pandas"]
+test = ["pytest", "hypothesis"]
+dev = ["ruff"]
+
+[tool.setuptools]
+py-modules = [
+    "evaluation_harness", "topk_stability", "numerical_bounds", "dataset_loaders",
+    "model_adapters", "run_provenance", "corrected_results", "artifact_index",
+    "agent_retrieval_graph", "fisher_information_geometry", "theorem1_diagnostics",
+    "margin_diagnostics", "analyze_results", "plots", "verify_invariants", "phase1_smoke",
+]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = ["build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+# E501: existing line lengths are left as written; reformatting is out of scope.
+# E741: `I` is the identity matrix in the historical spectral code.
+# E731: short local lambdas keep the score/dot helpers in the tests readable.
+ignore = ["E501", "E741", "E731"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "verify_invariants.py"]
+python_files = ["test_*.py", "verify_invariants.py"]
+pythonpath = ["."]

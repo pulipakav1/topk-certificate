@@ -1,0 +1,49 @@
+[
+  {
+    "scores_old": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "bounds": [
+      2.6645352591003887e-15,
+      2.6645352591003887e-15,
+      2.6645352591003887e-15,
+      2.6645352591003887e-15
+    ],
+    "candidate_ids": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "k": 2,
+    "noise_std": 0.0,
+    "topk": [
+      0,
+      1
+    ],
+    "margin_k": 0.0,
+    "b_max": 2.6645352591003887e-15,
+    "min_pairwise_gap": -5.3290705182007774e-15,
+    "min_rank_gap": -5.3290705182007774e-15,
+    "global_certified": false,
+    "pairwise_certified": false,
+    "order_certified": false,
+    "ordered_certified": false,
+    "certificate_kind": "float64_guarded",
+    "real_bounds": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "score_error_bounds": [
+      2.6645352591003883e-15,
+      2.6645352591003883e-15,
+      2.6645352591003883e-15,
+      2.6645352591003883e-15
+    ]
+  }
+]

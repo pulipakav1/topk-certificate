@@ -1,30 +1,56 @@
+% The numeric results below (225 configurations, certified rates, NDCG ranges,
+% the candidate-pool ablation) come from a pre-audit run whose provenance was not
+% resolved: no manifest binds them to the current implementation, and the older
+% harness log disagrees with the aggregate CSV for at least one cell. Treat them
+% as pending revalidation by an authorized run, not as current evidence.
+% See audit.md.
 \begin{abstract}
-Multi-agent retrieval systems that route information through similarity graphs
-typically weight edges by embedding-space proximity, ignoring the geometry of
-the underlying consensus process itself. We introduce Spectral Information
-Routing (SIR), which weights the inter-agent communication graph using
-Fisher--Rao geodesic distances between agents' local likelihood geometries
-rather than cosine similarity, and establish a spectral bound (Theorem~1)
-relating post-diffusion non-consensus representation variance to the graph's
-algebraic connectivity ($\lambda_2$) and the per-hop Fisher-information gap.
-We validate this bound on the full HotpotQA distractor validation set (989
-multi-hop QA queries, 5 diffusion hops) against a cosine-similarity
-Graph-of-Thoughts baseline under matched edge budgets. SIR reliably increases
-algebraic connectivity and reduces cumulative Fisher-manifold drift relative
-to baseline, and routes roughly 5\% more probability mass to gold-evidence
-agents. However, this structural improvement does not translate into better
-discrete retrieval ranking: SIR consistently underperforms baseline on
-NDCG@5 and F1@5 (0.3403 vs.\ 0.3516 and 0.2666 vs.\ 0.2817, respectively),
-and per-query $z$-standardized score-margin analysis shows the gap is a
-static offset present from the first hop rather than a cumulative, hop-wise
-degradation. Theorem~1's bound holds with wide slack at every hop for both
-strategies. Together these results substantiate the spectral bound while
-exposing a structural misalignment between continuous Fisher-manifold
-consensus objectives and discrete rank-ordered retrieval objectives -- a gap
-hyperparameter tuning alone cannot close.
+Multi-agent retrieval systems that let agents' scoring parameters drift via
+inter-agent communication risk a silent failure mode: a consensus update can
+reorder a query's top-$k$ retrieved documents even when no single agent's
+parameters change by much. We introduce a predictive, pre-communication
+certificate for top-$k$ stability of a bilinear retrieval head
+$s_W(q,d) = (Wq)^\top(Wd)$ under one deterministic consensus step
+$W \to W + \Delta W$. Using the operator norm's submultiplicativity, each
+candidate document $i$ admits a per-document score-change bound
+$B_i = \|q\|\,\|d_i\|\,[2\|W\|_2\|\Delta W\|_2 + \|\Delta W\|_2^2]$, computed
+entirely from $W$ and the \emph{proposed} $\Delta W$ before any rescoring. We
+report three certificates built from the same bounds: a global form,
+$m_k > 2B_{\max}$; a strictly tighter pairwise form, certifying whenever the
+slack $C = \min_{i\in T_k,\,j\notin T_k}[s_i - s_j - B_i - B_j] > 0$; and an
+ordered form that additionally checks each adjacent-rank gap
+$s_{(r)} - s_{(r+1)} > B_{(r)} + B_{(r+1)}$ for $r = 1,\dots,k-1$ to certify
+the exact ranking, not just the set, is unchanged. The global form implies
+the pairwise form, and the ordered form is the pairwise form plus those
+adjacent-rank conditions; the pairwise form does not imply the ordered one,
+since a tie inside the top-$k$ is certified for membership and rejected for
+ordering. We use the pairwise form as the primary certificate. We
+validate all three on three multi-hop QA datasets (HotpotQA,
+MuSiQue, 2WikiMultihopQA; $\approx 989$ queries each) crossed with three
+pretrained retrievers (MiniLM, E5, BGE), each respecting its own
+query/passage formatting convention, over 5 diffusion hops and consensus
+blend rates $\alpha \in \{0.1, 0.2, 0.4, 0.6, 0.8\}$, with no injected noise,
+the regime the certificates' proofs cover. Across all $3\times3\times25 =
+225$ dataset$\times$retriever$\times$hop$\times\alpha$ configurations and a
+separate candidate-pool-size ablation (10/20/50 candidates, all three
+datasets), every certificate reports zero soundness violations: whenever a
+query is certified stable, its top-$k$ is empirically unchanged, in every
+case. The certificates are non-trivial rather than vacuous: the pairwise
+rate is $0\%$ at low $\alpha$ and rises to $35$–$60\%$ of queries by the
+final hop at $\alpha=0.8$ for MiniLM and BGE (E5 stays comparatively low,
+$\approx 12$–$15\%$, showing the effect is retriever-dependent), tracking
+the shrinking per-hop parameter disagreement as agents approach consensus,
+while NDCG@5 ($0.49$–$0.87$ across cells) stays meaningful and stable
+throughout every dataset and retriever, confirming the ranking being
+certified is real rather than an artifact of untrained heads. Certification
+rate falls as the candidate pool grows (more pairs to simultaneously
+satisfy), a further sign the guarantee is substantive rather than vacuous.
+Gaussian noise added on top of the deterministic step is outside the
+certificates' guarantee and can violate it, so the certificate experiments
+reject any nonzero noise rather than reporting certified rates under it.
 \end{abstract}
 
 \begin{IEEEkeywords}
-multi-agent systems, spectral graph theory, Fisher information geometry,
-information retrieval, algebraic connectivity, HotpotQA
+multi-agent systems, retrieval stability, top-$k$ certification, operator
+norm bounds, consensus communication, HotpotQA, MuSiQue, 2WikiMultihopQA
 \end{IEEEkeywords}

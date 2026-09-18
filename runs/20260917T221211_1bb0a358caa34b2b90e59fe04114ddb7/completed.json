@@ -1,0 +1,19 @@
+{
+  "timestamp_utc": "2026-09-17T22:12:12.247961+00:00",
+  "files": {
+    "configuration.json": "5455a0d0d6bf22d006f14454fb2d2365507944942c0ed9928dd3435f74247a6d",
+    "hop_1_decisions.json": "fbda8a4c2feae288db4bb0105bcf980320ea08c170e6e3fb57ce857e19fdf218",
+    "hop_1_pre_update.npz": "85519cd360d9d130a77251dca9c0175d112bd98eac536deb29375370144aaabc",
+    "hop_1_scores_new.npy": "c55abf342a7b2d20abd60236195b414f918a3dfaebee510479390850d72e557b",
+    "hop_2_decisions.json": "4b368c56825787b35f5d4ac7c36216d788fa122361f1b755f17a4d8ceb7ebd49",
+    "hop_2_pre_update.npz": "e535442192addb69a4ae895535f1fcc57574c0e335a06ef2d926b6f71e9c9b9a",
+    "hop_2_scores_new.npy": "b63f8dd90a8675cc538104ce46e60b0e56fc5ddf0cc4de0f8d89212945d7430a",
+    "inputs.npz": "368db27bb2ae5707e72426a3fa1056517d35ae05af5584659a26f4664f15c957",
+    "manifest.json": "5455a0d0d6bf22d006f14454fb2d2365507944942c0ed9928dd3435f74247a6d",
+    "metrics.csv": "0a51f4a7c896a03556bbc48ae0f6e17853fc15bf45c759033be8c459e2b39823",
+    "metrics.csv.audit.json": "7293d66a830ea8a06dcd80ee6d64cea0ed6f99898bb816aa7a965e8c00cacc79",
+    "per_query.csv": "b42c5dd22dc0de96a3ceaeb3640f43560f424e9fca927dc3630737be5ed1685d",
+    "per_query.csv.audit.json": "29c39282769e3792a8cb9a44e940e013f672affcacf1e1bc4544ace0fab31c5d",
+    "records.json": "b69fed302a90a9ddaa1ce4d6a749c28ba40d5fd70a4498a90ced929ddd394109"
+  }
+}

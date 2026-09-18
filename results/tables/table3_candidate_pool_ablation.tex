@@ -1,0 +1,19 @@
+\begin{table}
+\caption{Candidate-pool-size ablation (200-query stress-test subset).}
+\label{tab:table3_candidate_pool_ablation}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+dataset & n_candidates & ndcg_at_5 & pairwise_certificate_rate & ordered_certificate_rate & topk_changed_rate & global_certificate_violations & pairwise_certificate_violations & ordered_certificate_violations \\
+\midrule
+2wikimultihopqa & 10 & 0.5986 & 0.0600 & 0.0000 & 0.0150 & 0 & 0 & 0 \\
+2wikimultihopqa & 20 & 0.5688 & 0.0200 & 0.0000 & 0.0000 & 0 & 0 & 0 \\
+2wikimultihopqa & 50 & 0.4927 & 0.0050 & 0.0000 & 0.0250 & 0 & 0 & 0 \\
+hotpotqa & 10 & 0.7025 & 0.0300 & 0.0000 & 0.0150 & 0 & 0 & 0 \\
+hotpotqa & 20 & 0.6991 & 0.0200 & 0.0000 & 0.0050 & 0 & 0 & 0 \\
+hotpotqa & 50 & 0.6924 & 0.0200 & 0.0000 & 0.0050 & 0 & 0 & 0 \\
+musique & 10 & 0.7205 & 0.0750 & 0.0000 & 0.0100 & 0 & 0 & 0 \\
+musique & 20 & 0.6005 & 0.0300 & 0.0000 & 0.0250 & 0 & 0 & 0 \\
+musique & 50 & 0.5820 & 0.0050 & 0.0000 & 0.0450 & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}

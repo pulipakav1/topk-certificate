@@ -1,0 +1,15 @@
+{
+  "timestamp_utc": "2026-09-17T20:10:58.206277+00:00",
+  "files": {
+    "configuration.json": "ff0b389776a594e7a7ffa9606d0183e9120dbf421eba5abb7844d2749389c4a8",
+    "hop_1_decisions.json": "0153f03e9cad4e229eea324885684804fb78dd444e8f6196cea3994a6d41db73",
+    "hop_1_pre_update.npz": "b448137cc7cebbddbaaf73ca32fcfaae8eaf57db71de373c6188d7800be59140",
+    "hop_1_scores_new.npy": "7b80220f43db0a8a43f5b6f4438c92f9f4791b418cf595923607ad9b51dd985b",
+    "hop_2_decisions.json": "4fdf09f346e26bb9f3281806e81ce9152a83eceff5630cf307dfdf31bb504428",
+    "hop_2_pre_update.npz": "d82cf97135f00f162af248bd0cf0a79832014487bfb37a8813ef5384033ef992",
+    "hop_2_scores_new.npy": "b45ac3e03e258294182cdfb75b88f1c5bfd04d9033ccb6ddc981a736a5c73ee4",
+    "manifest.json": "ff0b389776a594e7a7ffa9606d0183e9120dbf421eba5abb7844d2749389c4a8",
+    "metrics.csv": "703ae1a1a1e419d12054de51ea9628a3e598dce45f91272cb612ca65266cdf99",
+    "per_query.csv": "403eee57a26e0010485ad2facc92e404bdfab54ed96ca5e515778b43b7037fce"
+  }
+}

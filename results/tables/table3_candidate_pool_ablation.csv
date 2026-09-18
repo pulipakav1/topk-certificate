@@ -1,0 +1,10 @@
+dataset,n_candidates,ndcg_at_5,pairwise_certificate_rate,ordered_certificate_rate,topk_changed_rate,global_certificate_violations,pairwise_certificate_violations,ordered_certificate_violations
+2wikimultihopqa,10,0.5985617855120404,0.06,0.0,0.015,0,0,0
+2wikimultihopqa,20,0.568805166336519,0.02,0.0,0.0,0,0,0
+2wikimultihopqa,50,0.4927495270513097,0.005,0.0,0.025,0,0,0
+hotpotqa,10,0.7024739343474874,0.03,0.0,0.015,0,0,0
+hotpotqa,20,0.6990503207049644,0.02,0.0,0.005,0,0,0
+hotpotqa,50,0.6924376173102261,0.02,0.0,0.005,0,0,0
+musique,10,0.7205078573987785,0.075,0.0,0.01,0,0,0
+musique,20,0.6005127928307217,0.03,0.0,0.025,0,0,0
+musique,50,0.5819716322294468,0.005,0.0,0.045,0,0,0

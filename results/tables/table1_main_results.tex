@@ -1,0 +1,19 @@
+\begin{table}
+\caption{Main dataset x retriever results (mean over all hops/alphas).}
+\label{tab:table1_main_results}
+\begin{tabular}{llrrrrrrrrrrr}
+\toprule
+dataset & retriever_short & ndcg_at_5 & pairwise_certificate_rate & global_certificate_rate & ordered_certificate_rate & topk_changed_rate & global_certificate_violations & pairwise_certificate_violations & ordered_certificate_violations & param_disagreement & score_bound & empirical_score_delta \\
+\midrule
+2wikimultihopqa & BGE & 0.8178 & 0.0154 & 0.0012 & 0.0039 & 0.1127 & 0 & 0 & 0 & 20.8998 & 34.1458 & 1.4606 \\
+2wikimultihopqa & E5 & 0.6667 & 0.0048 & 0.0000 & 0.0006 & 0.1821 & 0 & 0 & 0 & 20.8998 & 28.8925 & 1.5500 \\
+2wikimultihopqa & MiniLM & 0.6077 & 0.0313 & 0.0040 & 0.0076 & 0.0663 & 0 & 0 & 0 & 20.8998 & 10.5888 & 0.3386 \\
+hotpotqa & BGE & 0.8494 & 0.0157 & 0.0011 & 0.0036 & 0.1024 & 0 & 0 & 0 & 20.8998 & 34.4714 & 1.5343 \\
+hotpotqa & E5 & 0.7522 & 0.0057 & 0.0000 & 0.0008 & 0.1858 & 0 & 0 & 0 & 20.8998 & 28.7830 & 1.5551 \\
+hotpotqa & MiniLM & 0.7400 & 0.0282 & 0.0034 & 0.0085 & 0.0698 & 0 & 0 & 0 & 20.8998 & 7.5016 & 0.2669 \\
+musique & BGE & 0.7698 & 0.0153 & 0.0004 & 0.0034 & 0.1010 & 0 & 0 & 0 & 20.8998 & 34.7918 & 1.4534 \\
+musique & E5 & 0.6754 & 0.0060 & 0.0000 & 0.0007 & 0.1716 & 0 & 0 & 0 & 20.8998 & 29.4048 & 1.5437 \\
+musique & MiniLM & 0.7255 & 0.0282 & 0.0035 & 0.0082 & 0.0706 & 0 & 0 & 0 & 20.8998 & 8.5114 & 0.2676 \\
+\bottomrule
+\end{tabular}
+\end{table}

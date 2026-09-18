@@ -1,0 +1,22 @@
+# The environment this repository was tested in, pinned exactly.
+#
+# This is a record of a working set of versions, not a resolved lock file: it
+# pins only the packages this repository imports, and transitive dependencies
+# resolve freely. `pyproject.toml` carries the unpinned requirements for a normal
+# install; use this file to reproduce the tested environment.
+#
+# Tested on Python 3.14.2, Windows AMD64.
+
+numpy==2.5.3
+torch==2.14.0
+scipy==1.18.1
+networkx==3.6.1
+matplotlib==3.11.2
+pandas==3.0.5
+datasets==5.0.1
+transformers==5.17.0
+
+# Tests and checks
+pytest==9.1.1
+hypothesis==6.168.0
+ruff==0.16.8

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import math
-from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from dataclasses import dataclass
+from typing import Callable, List
 
 import networkx as nx
 import numpy as np
@@ -28,6 +27,37 @@ from fisher_information_geometry import (
     fisher_rao_edge_weights,
     iter_single_examples,
     linear_gaussian_log_likelihood,
+)
+from topk_stability import (
+    adjacent_rank_min_gap,
+    agent_disagreement,
+    aggregate_dual_stability,
+    aggregate_full_stability,
+    aggregate_predictive_stability,
+    aggregate_topk_stability,
+    dual_certificate,
+    full_certificate,
+    validate_certificate,
+    max_abs_score_delta,
+    ordered_topk_indices,
+    pairwise_min_gap,
+    param_change_norm,
+    per_document_bounds,
+    predictive_certificate,
+    query_score_bound,
+    score_change_bound,
+    spectral_norm,
+    topk_boundary_margin,
+    topk_indices,
+    topk_stability_certificate,
+)
+from dataset_loaders import RawExample, _assemble_candidates, known_datasets
+from model_adapters import (
+    format_passage,
+    format_query,
+    known_retrievers,
+    pool_hidden_states,
+    pooling_strategy,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -294,6 +324,536 @@ def test_edge_weight_kernel_no_division_bounded_output() -> None:
 
 
 # --------------------------------------------------------------------------
+# check topk
+# --------------------------------------------------------------------------
+
+def test_topk_boundary_margin_matches_manual_sort() -> None:
+    """margin test"""
+    scores = np.array([0.1, 0.9, 0.5, 0.3, 0.7])  # sorted desc
+    margin = topk_boundary_margin(scores, k=2)
+    assert abs(margin - (0.7 - 0.5)) < 1e-9, f"Expected margin=0.2, got {margin!r}"
+
+
+def test_topk_boundary_margin_rejects_invalid_k() -> None:
+    """bounds test"""
+    scores = np.array([0.1, 0.2, 0.3])
+    for bad_k in (0, -1, 3, 10):
+        try:
+            topk_boundary_margin(scores, k=bad_k)
+        except ValueError:
+            continue
+        raise AssertionError(f"topk_boundary_margin accepted invalid k={bad_k}")
+
+
+def test_topk_indices_matches_argsort() -> None:
+    """indices test"""
+    scores = np.array([3.0, 1.0, 4.0, 1.5, 5.0])
+    idx = set(topk_indices(scores, k=2).tolist())
+    assert idx == {4, 2}, f"Expected indices of the two largest scores {{4, 2}}, got {idx!r}"
+
+
+def test_param_change_norm_zero_when_unchanged() -> None:
+    """drift test"""
+    theta = np.random.default_rng(0).normal(size=(5, 8))
+    assert param_change_norm(theta, theta) == 0.0
+
+
+def test_param_change_norm_matches_manual() -> None:
+    """drift value"""
+    rng = np.random.default_rng(1)
+    theta_old = rng.normal(size=(4, 6))
+    theta_new = theta_old + 1.0  # uniform shift
+    expected = float(np.linalg.norm(np.ones(6)))
+    got = param_change_norm(theta_old, theta_new)
+    assert abs(got - expected) < 1e-9, f"Expected {expected:.6f}, got {got:.6f}"
+
+
+def test_max_abs_score_delta_basic() -> None:
+    """delta test"""
+    s_old = np.array([1.0, 2.0, 3.0])
+    s_new = np.array([1.0, 2.5, 2.0])
+    assert abs(max_abs_score_delta(s_old, s_new) - 1.0) < 1e-9  # largest move
+
+
+def test_topk_stability_certificate_certifies_small_perturbation() -> None:
+    """certified test"""
+    s_old = np.array([5.0, 4.0, 1.0, 0.5])   # wide margin
+    s_new = s_old + np.array([0.1, -0.1, 0.05, -0.05])  # small jump
+    result = topk_stability_certificate(s_old, s_new, k=2)
+    assert result["certified"] is True
+    assert result["topk_changed"] is False
+
+
+def test_topk_stability_certificate_detects_uncertified_and_changed() -> None:
+    """uncertified test"""
+    s_old = np.array([5.0, 4.0, 3.9, 0.5])   # tight margin
+    s_new = np.array([5.0, 3.0, 4.5, 0.5])   # docs swap
+    result = topk_stability_certificate(s_old, s_new, k=2)
+    assert result["certified"] is False
+    assert result["topk_changed"] is True
+
+
+def test_topk_stability_certificate_soundness_random_trials() -> None:
+    """soundness test"""
+    rng = np.random.default_rng(123)
+    violations = 0
+    n_trials = 500
+    for _ in range(n_trials):
+        n_docs = int(rng.integers(4, 12))
+        k = int(rng.integers(1, n_docs))  # valid k
+        s_old = rng.normal(size=n_docs)
+        noise_scale = rng.uniform(0.0, 3.0)
+        s_new = s_old + rng.normal(scale=noise_scale, size=n_docs)
+        result = topk_stability_certificate(s_old, s_new, k)
+        if result["certified"] and result["topk_changed"]:
+            violations += 1
+    assert violations == 0, f"Certificate soundness violated in {violations}/{n_trials} random trials."
+
+
+def test_aggregate_topk_stability_batch_matches_manual_rates() -> None:
+    """batch test"""
+    s_old_1 = np.array([5.0, 4.0, 1.0, 0.5])
+    s_new_1 = s_old_1 + np.array([0.1, -0.1, 0.05, -0.05])  # stable case
+    s_old_2 = np.array([5.0, 4.0, 3.9, 0.5])
+    s_new_2 = np.array([5.0, 3.0, 4.5, 0.5])                # unstable case
+
+    agg = aggregate_topk_stability([s_old_1, s_old_2], [s_new_1, s_new_2], k=2)
+    assert agg["n_queries_used"] == 2
+    assert abs(agg["certificate_satisfied_rate"] - 0.5) < 1e-9
+    assert abs(agg["topk_changed_rate"] - 0.5) < 1e-9
+    assert agg["certificate_violations"] == 0
+
+
+# --------------------------------------------------------------------------
+# check bound
+# --------------------------------------------------------------------------
+
+def test_spectral_norm_orthogonal_is_one() -> None:
+    """spectral test"""
+    theta = np.pi / 5
+    rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    assert abs(spectral_norm(rot) - 1.0) < 1e-9
+
+
+def test_spectral_norm_matches_largest_singular_value() -> None:
+    """singular test"""
+    U, _ = np.linalg.qr(np.random.default_rng(2).normal(size=(4, 4)))
+    V, _ = np.linalg.qr(np.random.default_rng(3).normal(size=(4, 4)))
+    singulars = np.array([5.0, 3.0, 1.0, 0.2])
+    W = U @ np.diag(singulars) @ V.T
+    assert abs(spectral_norm(W) - 5.0) < 1e-7
+
+
+def test_score_change_bound_matches_manual_formula() -> None:
+    """cap formula test"""
+    bound = score_change_bound(w_norm=2.0, delta_w_norm=0.5, q_norm=3.0, d_norm=4.0)
+    assert abs(bound - 27.0) < 1e-9  # 3*4*(2*2*0.5 + 0.25)
+
+
+def test_score_change_bound_dominates_actual_change_random_trials() -> None:
+    """cap soundness test"""
+    rng = np.random.default_rng(7)
+    n_trials = 300
+    violations = 0
+    for _ in range(n_trials):
+        dim = int(rng.integers(2, 6))
+        W = rng.normal(size=(dim, dim)) * 0.5
+        delta_w = rng.normal(size=(dim, dim)) * rng.uniform(0.0, 0.3)
+        q = rng.normal(size=dim)
+        d = rng.normal(size=dim)
+
+        s_old = float((W @ q) @ (W @ d))
+        s_new = float(((W + delta_w) @ q) @ ((W + delta_w) @ d))
+        actual = abs(s_new - s_old)
+
+        bound = score_change_bound(
+            spectral_norm(W), spectral_norm(delta_w), float(np.linalg.norm(q)), float(np.linalg.norm(d))
+        )
+        if actual > bound + 1e-8:
+            violations += 1
+    assert violations == 0, f"score_change_bound violated in {violations}/{n_trials} random trials."
+
+
+def test_query_score_bound_picks_max_over_docs() -> None:
+    """query cap test"""
+    q_norm = 2.0
+    doc_norms = np.array([1.0, 3.0, 2.0])
+    w_norms = np.array([1.0, 1.0, 1.0])
+    delta_w_norms = np.array([0.1, 0.1, 0.1])
+    per_doc = [score_change_bound(w_norms[j], delta_w_norms[j], q_norm, doc_norms[j]) for j in range(3)]
+    got = query_score_bound(q_norm, doc_norms, w_norms, delta_w_norms)
+    assert abs(got - max(per_doc)) < 1e-9
+
+
+def test_agent_disagreement_zero_when_identical() -> None:
+    """spread zero test"""
+    theta = np.tile(np.array([1.0, 2.0, 3.0]), (4, 1))
+    assert agent_disagreement(theta) == 0.0
+
+
+def test_agent_disagreement_matches_manual() -> None:
+    """spread value test"""
+    theta = np.array([[0.0, 0.0], [2.0, 0.0]])  # center (1,0), each row 1 away
+    assert abs(agent_disagreement(theta) - 1.0) < 1e-9
+
+
+# --------------------------------------------------------------------------
+# check predictive
+# --------------------------------------------------------------------------
+
+def test_predictive_certificate_certifies_within_bound() -> None:
+    """predictive certified test"""
+    s_old = np.array([5.0, 4.0, 1.0, 0.5])   # wide margin
+    s_new = s_old + np.array([0.1, -0.1, 0.05, -0.05])  # small actual move
+    result = validate_certificate(predictive_certificate(s_old, k=2, b_max=0.2), s_new)
+    assert result["certified"] is True
+    assert result["topk_changed"] is False
+    assert result["bound_holds"] is True
+
+
+def test_predictive_certificate_flags_bound_break() -> None:
+    """bound break test"""
+    s_old = np.array([5.0, 4.0, 1.0, 0.5])
+    s_new = s_old + np.array([0.2, -0.2, 0.0, 0.0])  # actual exceeds the cap
+    result = validate_certificate(predictive_certificate(s_old, k=2, b_max=0.05), s_new)
+    assert result["bound_holds"] is False
+
+
+def test_predictive_certificate_soundness_random_trials() -> None:
+    """predictive soundness test"""
+    rng = np.random.default_rng(99)
+    n_trials = 300
+    violations = 0
+    for _ in range(n_trials):
+        n_docs = int(rng.integers(4, 9))
+        w_norms = rng.uniform(0.1, 2.0, size=n_docs)
+        delta_w_norms = rng.uniform(0.0, 0.5, size=n_docs)
+        q_norm = rng.uniform(0.1, 2.0)
+        doc_norms = rng.uniform(0.1, 2.0, size=n_docs)
+
+        s_old = rng.normal(size=n_docs)
+        per_doc_cap = q_norm * doc_norms * (2.0 * w_norms * delta_w_norms + delta_w_norms ** 2)
+        s_new = s_old + rng.uniform(-1.0, 1.0, size=n_docs) * per_doc_cap  # respects its own cap
+
+        k = int(rng.integers(1, n_docs))
+        b_max = query_score_bound(q_norm, doc_norms, w_norms, delta_w_norms)
+        result = validate_certificate(predictive_certificate(s_old, k, b_max), s_new)
+        if result["certified"] and result["topk_changed"]:
+            violations += 1
+    assert violations == 0, f"Predictive certificate soundness violated in {violations}/{n_trials} random trials."
+
+
+def test_aggregate_predictive_stability_batch_matches_manual() -> None:
+    """predictive batch test"""
+    s_old_1 = np.array([5.0, 4.0, 1.0, 0.5])
+    s_new_1 = s_old_1 + np.array([0.1, -0.1, 0.05, -0.05])  # stable case, wide margin
+    s_old_2 = np.array([5.0, 4.0, 3.9, 0.5])
+    s_new_2 = np.array([5.0, 3.0, 4.5, 0.5])                # unstable case, tight margin
+
+    agg = aggregate_predictive_stability([predictive_certificate(s_old_1, 2, 0.05), predictive_certificate(s_old_2, 2, 0.2)], [s_new_1, s_new_2])
+    assert agg["n_queries_used"] == 2
+    assert abs(agg["certificate_satisfied_rate"] - 0.5) < 1e-9
+    assert abs(agg["topk_changed_rate"] - 0.5) < 1e-9
+    assert agg["bound_holds_rate"] == 0.0
+    assert agg["certificate_violations"] == 0
+
+
+# --------------------------------------------------------------------------
+# check pairwise
+# --------------------------------------------------------------------------
+
+def test_per_document_bounds_matches_scalar_formula() -> None:
+    """doc caps test"""
+    q_norm = 2.0
+    doc_norms = np.array([1.0, 3.0])
+    w_norms = np.array([1.0, 2.0])
+    delta_w_norms = np.array([0.1, 0.2])
+    got = per_document_bounds(q_norm, doc_norms, w_norms, delta_w_norms)
+    expected = np.array([
+        score_change_bound(w_norms[0], delta_w_norms[0], q_norm, doc_norms[0]),
+        score_change_bound(w_norms[1], delta_w_norms[1], q_norm, doc_norms[1]),
+    ])
+    assert np.allclose(got, expected)
+
+
+def test_pairwise_min_gap_matches_manual() -> None:
+    """pairwise gap test"""
+    scores = np.array([5.0, 4.0, 1.0, 0.5])
+    b = np.full(4, 0.1)
+    got = pairwise_min_gap(scores, b, k=2)
+    assert abs(got - 2.8) < 1e-9  # tightest pair is (score=4.0) vs (score=1.0)
+
+
+def test_pairwise_min_gap_rejects_invalid_k() -> None:
+    """pairwise bounds test"""
+    scores = np.array([0.1, 0.2, 0.3])
+    b = np.full(3, 0.01)
+    for bad_k in (0, -1, 3, 10):
+        try:
+            pairwise_min_gap(scores, b, k=bad_k)
+        except ValueError:
+            continue
+        raise AssertionError(f"pairwise_min_gap accepted invalid k={bad_k}")
+
+
+def test_pairwise_certifies_when_global_blocked_by_one_outlier_bound() -> None:
+    """pairwise wins test"""
+    s_old = np.array([5.0, 4.0, 1.0, 0.9, -100.0])
+    b = np.array([0.1, 0.1, 0.1, 0.1, 5.0])  # one huge, irrelevant bound
+    result = validate_certificate(dual_certificate(s_old, k=2, b=b), s_old)
+    assert result["global_certified"] is False
+    assert result["pairwise_certified"] is True
+
+
+def test_global_certified_implies_pairwise_certified_random_trials() -> None:
+    """implication test"""
+    rng = np.random.default_rng(11)
+    n_trials = 300
+    for _ in range(n_trials):
+        n_docs = int(rng.integers(4, 10))
+        k = int(rng.integers(1, n_docs))
+        scores = rng.normal(size=n_docs)
+        b = rng.uniform(0.0, 1.0, size=n_docs)
+
+        margin_k = topk_boundary_margin(scores, k)
+        global_certified = margin_k > 2.0 * float(np.max(b))
+        pairwise_certified = pairwise_min_gap(scores, b, k) > 0.0
+
+        if global_certified:
+            assert pairwise_certified, "global certified but pairwise not -- pairwise should be weaker"
+
+
+def test_dual_certificate_pairwise_soundness_random_trials() -> None:
+    """pairwise soundness test"""
+    rng = np.random.default_rng(21)
+    n_trials = 300
+    violations = 0
+    for _ in range(n_trials):
+        n_docs = int(rng.integers(4, 10))
+        k = int(rng.integers(1, n_docs))
+        s_old = rng.normal(size=n_docs)
+        b = rng.uniform(0.0, 1.0, size=n_docs)
+        s_new = s_old + rng.uniform(-1.0, 1.0, size=n_docs) * b  # each move respects its own cap
+
+        result = validate_certificate(dual_certificate(s_old, k, b), s_new)
+        if result["pairwise_certified"] and result["topk_changed"]:
+            violations += 1
+    assert violations == 0, f"Pairwise certificate soundness violated in {violations}/{n_trials} random trials."
+
+
+def test_aggregate_dual_stability_batch_matches_manual() -> None:
+    """dual batch test"""
+    s_old_1 = np.array([5.0, 4.0, 1.0, 0.5])
+    s_new_1 = s_old_1 + np.array([0.1, -0.1, 0.05, -0.05])  # stable case
+    b_1 = np.full(4, 0.05)
+    s_old_2 = np.array([5.0, 4.0, 3.9, 0.5])
+    s_new_2 = np.array([5.0, 3.0, 4.5, 0.5])                # unstable case
+    b_2 = np.full(4, 0.2)
+
+    agg = aggregate_dual_stability([dual_certificate(s_old_1, 2, b_1), dual_certificate(s_old_2, 2, b_2)], [s_new_1, s_new_2])
+    assert agg["n_queries_used"] == 2
+    assert abs(agg["global_certificate_rate"] - 0.5) < 1e-9
+    assert abs(agg["pairwise_certificate_rate"] - 0.5) < 1e-9
+    assert abs(agg["topk_changed_rate"] - 0.5) < 1e-9
+    assert agg["global_certificate_violations"] == 0
+    assert agg["pairwise_certificate_violations"] == 0
+
+
+# --------------------------------------------------------------------------
+# check ordered
+# --------------------------------------------------------------------------
+
+def test_ordered_topk_indices_matches_argsort() -> None:
+    """ordered picks test"""
+    scores = np.array([3.0, 1.0, 4.0, 1.5, 5.0])
+    assert ordered_topk_indices(scores, k=2) == (4, 2)
+
+
+def test_adjacent_rank_min_gap_matches_manual() -> None:
+    """rank gaps test"""
+    scores = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+    b = np.full(5, 0.1)
+    got = adjacent_rank_min_gap(scores, b, k=3)
+    assert abs(got - 0.8) < 1e-9  # (5-4-.2) and (4-3-.2), both 0.8
+
+
+def test_full_certificate_ordered_certifies_small_perturbation() -> None:
+    """ordered certified test"""
+    s_old = np.array([5.0, 4.0, 3.0, 0.5])
+    s_new = s_old + np.array([0.01, -0.01, 0.005, -0.005])
+    b = np.full(4, 0.05)
+    result = validate_certificate(full_certificate(s_old, k=2, b=b), s_new)
+    assert result["order_certified"] is True
+    assert result["pairwise_certified"] is True
+    assert result["ordered_certified"] is True
+    assert result["ordering_changed"] is False
+
+
+def test_full_certificate_ordered_soundness_random_trials() -> None:
+    """ordered soundness test"""
+    rng = np.random.default_rng(55)
+    n_trials = 300
+    violations = 0
+    for _ in range(n_trials):
+        n_docs = int(rng.integers(4, 10))
+        k = int(rng.integers(2, n_docs))  # k>=2 for a nontrivial rank check
+        s_old = rng.normal(size=n_docs)
+        b = rng.uniform(0.0, 1.0, size=n_docs)
+        s_new = s_old + rng.uniform(-1.0, 1.0, size=n_docs) * b  # respects its own cap
+
+        result = validate_certificate(full_certificate(s_old, k, b), s_new)
+        if result["ordered_certified"] and result["ordering_changed"]:
+            violations += 1
+    assert violations == 0, f"Ordered certificate soundness violated in {violations}/{n_trials} random trials."
+
+
+def test_certificate_slack_sign_matches_pairwise_certified_random_trials() -> None:
+    """slack sign test"""
+    rng = np.random.default_rng(66)
+    for _ in range(200):
+        n_docs = int(rng.integers(4, 10))
+        k = int(rng.integers(1, n_docs))
+        s_old = rng.normal(size=n_docs)
+        s_new = s_old + rng.normal(scale=0.1, size=n_docs)
+        b = rng.uniform(0.0, 1.0, size=n_docs)
+        result = validate_certificate(full_certificate(s_old, k, b), s_new)
+        assert (result["min_pairwise_gap"] > 0.0) == result["pairwise_certified"]
+
+
+def test_aggregate_full_stability_batch_matches_manual() -> None:
+    """full batch test"""
+    s_old_1 = np.array([5.0, 4.0, 1.0, 0.5])
+    s_new_1 = s_old_1 + np.array([0.1, -0.1, 0.05, -0.05])  # stable, well-ordered
+    b_1 = np.full(4, 0.05)
+    s_old_2 = np.array([5.0, 4.0, 3.9, 0.5])
+    s_new_2 = np.array([5.0, 3.0, 4.5, 0.5])                # unstable, reorders
+    b_2 = np.full(4, 0.2)
+
+    agg = aggregate_full_stability([full_certificate(s_old_1, 2, b_1), full_certificate(s_old_2, 2, b_2)], [s_new_1, s_new_2])
+    assert agg["n_queries_used"] == 2
+    assert abs(agg["global_certificate_rate"] - 0.5) < 1e-9
+    assert abs(agg["pairwise_certificate_rate"] - 0.5) < 1e-9
+    assert abs(agg["ordered_certificate_rate"] - 0.5) < 1e-9
+    assert abs(agg["topk_changed_rate"] - 0.5) < 1e-9
+    assert abs(agg["ordering_changed_rate"] - 0.5) < 1e-9
+    assert agg["global_certificate_violations"] == 0
+    assert agg["pairwise_certificate_violations"] == 0
+    assert agg["ordered_certificate_violations"] == 0
+
+
+# --------------------------------------------------------------------------
+# check adapters
+# --------------------------------------------------------------------------
+
+def test_format_query_passage_preserve_text_all_models() -> None:
+    """formatter test"""
+    text = "what is the capital of France"
+    for model in known_retrievers():
+        q = format_query(model, text)
+        p = format_passage(model, text)
+        assert text in q, f"{model} query formatting dropped the original text"
+        assert text in p, f"{model} passage formatting dropped the original text"
+        assert isinstance(q, str) and isinstance(p, str)
+
+
+def test_known_registries_have_expected_entries() -> None:
+    """registry test"""
+    assert set(known_retrievers()) == {
+        "sentence-transformers/all-MiniLM-L6-v2", "intfloat/e5-small-v2", "BAAI/bge-small-en-v1.5",
+    }
+    assert set(known_datasets()) == {"hotpotqa", "musique", "2wikimultihopqa"}
+
+
+def test_e5_formatting_uses_exact_prefixes() -> None:
+    """e5 prefix test"""
+    assert format_query("intfloat/e5-small-v2", "cats") == "query: cats"
+    assert format_passage("intfloat/e5-small-v2", "cats") == "passage: cats"
+
+
+def test_bge_formatting_uses_exact_prefixes() -> None:
+    """bge prefix test"""
+    assert format_query("BAAI/bge-small-en-v1.5", "cats") == (
+        "Represent this sentence for searching relevant passages: cats"
+    )
+    assert format_passage("BAAI/bge-small-en-v1.5", "cats") == "cats"  # no passage instruction
+
+
+def test_minilm_formatting_is_identity() -> None:
+    """minilm prefix test"""
+    assert format_query("sentence-transformers/all-MiniLM-L6-v2", "cats") == "cats"
+    assert format_passage("sentence-transformers/all-MiniLM-L6-v2", "cats") == "cats"
+
+
+def test_pooling_strategy_per_model() -> None:
+    """pooling choice test"""
+    assert pooling_strategy("BAAI/bge-small-en-v1.5") == "cls"
+    assert pooling_strategy("intfloat/e5-small-v2") == "mean"
+    assert pooling_strategy("sentence-transformers/all-MiniLM-L6-v2") == "mean"
+
+
+def test_pool_hidden_states_cls_picks_first_token() -> None:
+    """cls pool test"""
+    hidden = torch.tensor([
+        [[1.0, 1.0], [9.0, 9.0], [9.0, 9.0]],
+        [[2.0, 2.0], [9.0, 9.0], [9.0, 9.0]],
+    ])
+    mask = torch.tensor([[1, 1, 0], [1, 0, 0]])
+    pooled = pool_hidden_states(hidden, mask, "BAAI/bge-small-en-v1.5")
+    assert torch.allclose(pooled, torch.tensor([[1.0, 1.0], [2.0, 2.0]]))
+
+
+def test_pool_hidden_states_mean_respects_attention_mask() -> None:
+    """mean pool test"""
+    hidden = torch.tensor([
+        [[1.0, 1.0], [3.0, 3.0], [99.0, 99.0]],  # last token is padding
+    ])
+    mask = torch.tensor([[1, 1, 0]])
+    pooled = pool_hidden_states(hidden, mask, "intfloat/e5-small-v2")
+    assert torch.allclose(pooled, torch.tensor([[2.0, 2.0]]))  # mean of (1,1) and (3,3), padding excluded
+
+
+def test_pool_then_normalize_gives_unit_norm() -> None:
+    """unit norm test"""
+    rng = torch.Generator().manual_seed(0)
+    hidden = torch.randn(5, 4, 8, generator=rng)
+    mask = torch.ones(5, 4, dtype=torch.long)
+    for model in known_retrievers():
+        pooled = pool_hidden_states(hidden, mask, model)
+        normed = torch.nn.functional.normalize(pooled, p=2, dim=-1)
+        norms = normed.norm(dim=-1)
+        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-6), (
+            f"{model}: normalized embedding norm != 1 (got {norms.tolist()})"
+        )
+
+
+# --------------------------------------------------------------------------
+# check candidates
+# --------------------------------------------------------------------------
+
+def test_assemble_candidates_keeps_all_gold_and_hits_target_count() -> None:
+    """assemble test"""
+    ex = RawExample(
+        question="q",
+        gold_titles={"A", "B"},
+        paragraphs=[("A", "gold a"), ("B", "gold b"), ("C", "d1"), ("D", "d2"), ("E", "d3")],
+    )
+    rng = np.random.default_rng(0)
+    paragraphs, relevance = _assemble_candidates(ex, n_candidates=4, pool=[], rng=rng)
+    assert len(paragraphs) == 4
+    assert relevance.sum() == 2  # both gold titles survived
+
+
+def test_assemble_candidates_pads_from_cross_query_pool_when_short() -> None:
+    """pad test"""
+    ex = RawExample(question="q", gold_titles={"A"}, paragraphs=[("A", "gold a"), ("C", "d1")])
+    pool = [("X", "other q distractor 1"), ("Y", "other q distractor 2"), ("Z", "other q distractor 3")]
+    rng = np.random.default_rng(1)
+    paragraphs, relevance = _assemble_candidates(ex, n_candidates=5, pool=pool, rng=rng)
+    assert len(paragraphs) == 5
+    assert relevance.sum() == 1
+
+
+# --------------------------------------------------------------------------
 # print report
 # --------------------------------------------------------------------------
 
@@ -318,6 +878,51 @@ ALL_CHECKS: List[Callable[[], None]] = [
     test_edge_weight_range_extreme_gamma_underflow_is_caught,
     test_edge_weight_kernel_rejects_invalid_gamma,
     test_edge_weight_kernel_no_division_bounded_output,
+    test_topk_boundary_margin_matches_manual_sort,
+    test_topk_boundary_margin_rejects_invalid_k,
+    test_topk_indices_matches_argsort,
+    test_param_change_norm_zero_when_unchanged,
+    test_param_change_norm_matches_manual,
+    test_max_abs_score_delta_basic,
+    test_topk_stability_certificate_certifies_small_perturbation,
+    test_topk_stability_certificate_detects_uncertified_and_changed,
+    test_topk_stability_certificate_soundness_random_trials,
+    test_aggregate_topk_stability_batch_matches_manual_rates,
+    test_spectral_norm_orthogonal_is_one,
+    test_spectral_norm_matches_largest_singular_value,
+    test_score_change_bound_matches_manual_formula,
+    test_score_change_bound_dominates_actual_change_random_trials,
+    test_query_score_bound_picks_max_over_docs,
+    test_agent_disagreement_zero_when_identical,
+    test_agent_disagreement_matches_manual,
+    test_predictive_certificate_certifies_within_bound,
+    test_predictive_certificate_flags_bound_break,
+    test_predictive_certificate_soundness_random_trials,
+    test_aggregate_predictive_stability_batch_matches_manual,
+    test_per_document_bounds_matches_scalar_formula,
+    test_pairwise_min_gap_matches_manual,
+    test_pairwise_min_gap_rejects_invalid_k,
+    test_pairwise_certifies_when_global_blocked_by_one_outlier_bound,
+    test_global_certified_implies_pairwise_certified_random_trials,
+    test_dual_certificate_pairwise_soundness_random_trials,
+    test_aggregate_dual_stability_batch_matches_manual,
+    test_ordered_topk_indices_matches_argsort,
+    test_adjacent_rank_min_gap_matches_manual,
+    test_full_certificate_ordered_certifies_small_perturbation,
+    test_full_certificate_ordered_soundness_random_trials,
+    test_certificate_slack_sign_matches_pairwise_certified_random_trials,
+    test_aggregate_full_stability_batch_matches_manual,
+    test_format_query_passage_preserve_text_all_models,
+    test_known_registries_have_expected_entries,
+    test_e5_formatting_uses_exact_prefixes,
+    test_bge_formatting_uses_exact_prefixes,
+    test_minilm_formatting_is_identity,
+    test_pooling_strategy_per_model,
+    test_pool_hidden_states_cls_picks_first_token,
+    test_pool_hidden_states_mean_respects_attention_mask,
+    test_pool_then_normalize_gives_unit_norm,
+    test_assemble_candidates_keeps_all_gold_and_hits_target_count,
+    test_assemble_candidates_pads_from_cross_query_pool_when_short,
 ]
 
 
