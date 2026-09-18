@@ -85,7 +85,7 @@ These guarantees cover only the deterministic consensus proposal. They do not co
 
 `dataset_loaders.py` defaults to validation/dev data. Programmatic callers can override `dataset_slice`; the loader does not enforce a validation-only split:
 
-- **HotpotQA**: `hotpot_qa`, `distractor` configuration; contexts are joined as `title: sentences` and support titles are positive.
+- **HotpotQA**: `hotpotqa/hotpot_qa` (formerly the un-namespaced `hotpot_qa`, same commits), `distractor` configuration; contexts are joined as `title: sentences` and support titles are positive.
 - **2WikiMultiHopQA**: `framolfese/2WikiMultihopQA`; assumes the Hotpot-style `context` and `supporting_facts` schema.
 - **MuSiQue**: `dgslibisey/MuSiQue` dev JSONL; `paragraphs[].is_supporting` determines relevance. The raw `musique_ans_v1.0_dev.jsonl` is resolved with `hf_hub_download` at the pinned revision `c8f4f8c9465fb69d31a8eae894c3fd509c4ca321` (cache-only when HF offline mode is set) and loaded with `load_dataset("json", ...)`, because datasets 5.0.1 keys the repo-level `data_files` load differently online and offline, so its processed cache is never found offline. Manifests record repository, revision, source filename and raw-file SHA-256; the local `datasets` fingerprint is recorded separately and the old repo-level fingerprint `9eaf7aa381348ab4` is not authoritative.
 

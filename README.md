@@ -100,7 +100,7 @@ These are the commit hashes of the snapshots this repository was developed again
 
 | Repository | Revision |
 | --- | --- |
-| `hotpot_qa` | `1908d6afbbead072334abe2965f91bd2709910ab` |
+| `hotpotqa/hotpot_qa` | `1908d6afbbead072334abe2965f91bd2709910ab` |
 | `framolfese/2WikiMultihopQA` | `fe713bfbd1afbca1a65246741a75890405d56a3a` |
 | `dgslibisey/MuSiQue` | `c8f4f8c9465fb69d31a8eae894c3fd509c4ca321` |
 | `sentence-transformers/all-MiniLM-L6-v2` | `1110a243fdf4706b3f48f1d95db1a4f5529b4d41` |

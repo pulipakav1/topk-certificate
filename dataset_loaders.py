@@ -87,7 +87,7 @@ def _iter_hotpotqa_style_raw(
 
 def _iter_hotpotqa_raw(slice_str: str, revision=None) -> Iterable[RawExample]:
     """hotpotqa raw"""
-    yield from _iter_hotpotqa_style_raw("hotpot_qa", slice_str, config="distractor", revision=revision)
+    yield from _iter_hotpotqa_style_raw("hotpotqa/hotpot_qa", slice_str, config="distractor", revision=revision)
 
 
 def _iter_2wiki_raw(slice_str: str, revision=None) -> Iterable[RawExample]:

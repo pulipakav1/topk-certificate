@@ -133,7 +133,7 @@ claim that each certificate implies the next; only `global => pairwise` and
 
 Three datasets, all loaded through `load_dataset_records`:
 
-- **HotpotQA** — `hotpot_qa`, config `distractor`, split `validation`. Context is
+- **HotpotQA** — `hotpotqa/hotpot_qa`, config `distractor`, split `validation`. Context is
   parallel `title` / `sentences` lists; gold titles come from
   `supporting_facts.title`.
 - **2WikiMultiHopQA** — `framolfese/2WikiMultihopQA`, same schema as HotpotQA.

@@ -113,3 +113,13 @@ def test_dataset_adapter_keeps_both_paragraphs_of_a_repeated_title(dataset, monk
     records = loaders.load_dataset_records(dataset, 1, 2)
     assert len(records) == 1
     assert dict(zip(records[0]["paragraphs"], records[0]["relevance"])) == expected
+
+
+@pytest.mark.parametrize("dataset", ["hotpotqa", "2wikimultihopqa"])
+def test_repository_ids_are_namespaced(dataset, monkeypatch):
+    """Newer huggingface_hub rejects an un-namespaced id such as `hotpot_qa`."""
+    repo_ids = []
+    monkeypatch.setattr(loaders, "load_dataset", lambda repo, *a, **kw: repo_ids.append(repo) or [])
+    list(loaders._DATASET_LOADERS[dataset][0]("validation[:1]"))
+    assert len(repo_ids) == 1 and repo_ids[0].count("/") == 1
+    assert loaders.MUSIQUE_REPOSITORY.count("/") == 1
